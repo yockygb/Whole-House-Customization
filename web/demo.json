@@ -1,0 +1,184 @@
+[
+  {
+    "room": "主卧",
+    "cat": "custom_cabinet",
+    "material": "body_plywood",
+    "length_mm": 2400,
+    "height_mm": 2400,
+    "depth_mm": 600,
+    "qty": 1,
+    "note": "推拉门 + 顶柜",
+    "floor": "1F",
+    "door": "door_melamine",
+    "cab_name": "主卧衣柜",
+    "room_note": "靠窗位，需留窗帘盒",
+    "extras": {
+      "led": 6,
+      "led_power": 1,
+      "led_sensor": 1
+    },
+    "note_en": "Sliding doors and top cabinet",
+    "room_note_en": "Window side; allow for curtain box"
+  },
+  {
+    "room": "次卧",
+    "cat": "custom_cabinet",
+    "material": "body_particle",
+    "length_mm": 1800,
+    "height_mm": 2400,
+    "depth_mm": 600,
+    "qty": 1,
+    "note": "",
+    "floor": "1F",
+    "door": "door_melamine",
+    "cab_name": "次卧衣柜",
+    "extras": {
+      "led": 6,
+      "led_power": 1
+    },
+    "note_en": "",
+    "room_note_en": ""
+  },
+  {
+    "room": "玄关",
+    "cat": "custom_cabinet",
+    "material": "body_particle",
+    "length_mm": 1200,
+    "height_mm": 1000,
+    "depth_mm": 350,
+    "qty": 1,
+    "note": "",
+    "room_note": "进门左侧",
+    "door": "door_melamine",
+    "cab_name": "玄关鞋柜",
+    "extras": {
+      "led": 3,
+      "led_power": 1,
+      "led_sensor": 1
+    },
+    "note_en": "",
+    "room_note_en": "Left of entrance",
+    "floor": "GF"
+  },
+  {
+    "room": "客厅",
+    "cat": "custom_cabinet",
+    "material": "body_plywood",
+    "length_mm": 2000,
+    "height_mm": 450,
+    "depth_mm": 400,
+    "qty": 1,
+    "note": "矮柜，按3.3ft起算",
+    "door": "",
+    "cab_name": "电视柜",
+    "note_en": "Low cabinet; minimum billable height 3.3 ft",
+    "room_note_en": "",
+    "floor": "GF"
+  },
+  {
+    "room": "厨房",
+    "cat": "base_cabinet",
+    "material": "particle",
+    "length_mm": 3600,
+    "height_mm": 900,
+    "depth_mm": 600,
+    "qty": 1,
+    "note": "含台面下柜体",
+    "floor": "GF",
+    "room_note": "L型转角",
+    "extras": {
+      "quartz": 1,
+      "sink": 1,
+      "pull_down": 1,
+      "dish_basket": 1
+    },
+    "note_en": "Base cabinet below countertop",
+    "room_note_en": "L-shaped corner"
+  },
+  {
+    "room": "厨房",
+    "cat": "wall_cabinet",
+    "material": "particle",
+    "length_mm": 3600,
+    "height_mm": 700,
+    "depth_mm": 350,
+    "qty": 1,
+    "note": "",
+    "room_note": "L型转角",
+    "floor": "GF",
+    "extras": {
+      "glass_door": 1,
+      "led": 4,
+      "led_power": 1
+    },
+    "note_en": "",
+    "room_note_en": "L-shaped corner"
+  },
+  {
+    "room": "书房",
+    "cat": "custom_cabinet",
+    "material": "body_particle",
+    "length_mm": 1500,
+    "height_mm": 2400,
+    "depth_mm": 350,
+    "qty": 1,
+    "note": "颗粒板柜体 + 三聚氰胺门",
+    "door": "door_melamine",
+    "cab_name": "书柜",
+    "extras": {
+      "glass_door": 1
+    },
+    "extras_size": {
+      "glass_door": {
+        "w_mm": 1200,
+        "h_mm": 1800
+      }
+    },
+    "note_en": "Particle board carcass and melamine doors",
+    "room_note_en": "",
+    "floor": "GF"
+  },
+  {
+    "room": "阳台",
+    "cat": "custom_cabinet",
+    "material": "body_plywood",
+    "length_mm": 2000,
+    "height_mm": 2400,
+    "depth_mm": 600,
+    "qty": 1,
+    "note": "多层板柜体 + 门",
+    "door": "door_melamine",
+    "cab_name": "阳台柜",
+    "note_en": "Plywood carcass with doors",
+    "room_note_en": "",
+    "floor": "GF"
+  },
+  {
+    "room": "客厅",
+    "cat": "custom_cabinet",
+    "material": "body_particle",
+    "length_mm": 1800,
+    "height_mm": 2400,
+    "depth_mm": 600,
+    "qty": 1,
+    "note": "颗粒板柜体不装门",
+    "door": "",
+    "cab_name": "储物柜",
+    "note_en": "Particle board carcass without doors",
+    "room_note_en": "",
+    "floor": "GF"
+  },
+  {
+    "room": "客厅",
+    "cat": "wall_panel",
+    "material": "standard",
+    "length_mm": 3000,
+    "height_mm": 2400,
+    "depth_mm": 18,
+    "qty": 1,
+    "note": "护墙板",
+    "note_en": "",
+    "room_note_en": "",
+    "floor": "GF"
+  }
+]

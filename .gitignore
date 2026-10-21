@@ -1,0 +1,27 @@
+# Business data and generated output are never source code.
+/data/*
+!/data/factory-pricing.json
+/exports/
+/backups/
+/samples/
+/runtime/
+/work/
+/.venv/
+/venv/
+__pycache__/
+*.py[cod]
+*.db
+*.db-*
+*.sqlite*
+*.log
+*.bak
+*.tmp
+.env
+.env.*
+*.pem
+*.key
+/tests/*result*.json
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store

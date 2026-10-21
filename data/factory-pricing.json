@@ -1,0 +1,499 @@
+{
+  "meta": {
+    "program": "全屋定制报价系统",
+    "program_en": "Custom Whole-House Furniture Quotation System",
+    "version": "3.0.1",
+    "currency": "RM",
+    "currency_symbol": "RM",
+    "mm_per_ft": 304.8,
+    "price_mode": "low",
+    "price_modes": {
+      "low": "市场指导价下限",
+      "mid": "市场指导价中位",
+      "high": "市场指导价上限"
+    },
+    "price_modes_en": {
+      "low": "Market Price - Low",
+      "mid": "Market Price - Mid",
+      "high": "Market Price - High"
+    },
+    "nonstd_factor": 1.2,
+    "height_tol_ft": 0.1,
+    "updated": "2026-10-21",
+    "source_note": ""
+  },
+  "groups": [
+    {
+      "key": "cabinet",
+      "name": "定制柜体系",
+      "name_en": "Custom Cabinet System",
+      "unit": "ft²",
+      "basis": "长(ft) × 计价高(ft) × 深度系数"
+    },
+    {
+      "key": "kitchen",
+      "name": "橱柜体系",
+      "name_en": "Kitchen Cabinet System",
+      "unit": "ft",
+      "basis": "长度(ft) × 单价 × 非标系数"
+    }
+  ],
+  "rooms": [
+    {
+      "name": "主卧",
+      "name_en": "Master Bedroom"
+    },
+    {
+      "name": "次卧",
+      "name_en": "Second Bedroom"
+    },
+    {
+      "name": "儿童房",
+      "name_en": "Children's Room"
+    },
+    {
+      "name": "长辈房",
+      "name_en": "Elder's Room"
+    },
+    {
+      "name": "衣帽间",
+      "name_en": "Walk-in Closet"
+    },
+    {
+      "name": "书房",
+      "name_en": "Study"
+    },
+    {
+      "name": "客厅",
+      "name_en": "Living Room"
+    },
+    {
+      "name": "餐厅",
+      "name_en": "Dining Room"
+    },
+    {
+      "name": "厨房",
+      "name_en": "Kitchen"
+    },
+    {
+      "name": "玄关",
+      "name_en": "Foyer"
+    },
+    {
+      "name": "阳台",
+      "name_en": "Balcony"
+    },
+    {
+      "name": "卫生间",
+      "name_en": "Bathroom"
+    },
+    {
+      "name": "其他",
+      "name_en": "Others"
+    }
+  ],
+  "categories": [
+    {
+      "key": "custom_cabinet",
+      "name": "定制柜",
+      "name_en": "Custom Cabinet",
+      "group": "cabinet",
+      "measure": "area",
+      "std_depth_mm": 600,
+      "min_height_ft": 3.3,
+      "led_ft": 8,
+      "default_height_mm": 2400,
+      "note": "统一品类：具体柜型由报价行的「柜体名称」区分（主卧衣柜 / 玄关鞋柜…）；高度不足 3.3ft 按 3.3ft 计",
+      "name_field": true
+    },
+    {
+      "key": "wall_panel",
+      "name": "护墙板",
+      "name_en": "Wall Panel",
+      "group": "cabinet",
+      "measure": "area",
+      "std_depth_mm": 18,
+      "min_height_ft": 0,
+      "default_height_mm": 2400,
+      "ignore_depth": true
+    },
+    {
+      "key": "base_cabinet",
+      "name": "地柜",
+      "name_en": "Base Cabinet",
+      "group": "kitchen",
+      "measure": "length",
+      "std_depth_mm": 600,
+      "std_height_ft": 3.0,
+      "check_height": true,
+      "default_height_mm": 900
+    },
+    {
+      "key": "wall_cabinet",
+      "name": "吊柜",
+      "name_en": "Wall Cabinet",
+      "group": "kitchen",
+      "measure": "length",
+      "std_depth_mm": 350,
+      "std_height_ft": 2.3,
+      "check_height": false,
+      "default_height_mm": 700
+    }
+  ],
+  "led": {
+    "label": "灯带",
+    "label_en": "LED Strip",
+    "price_per_m": 0,
+    "power_price": 0,
+    "power_label": "电源",
+    "power_label_en": "Power Supply",
+    "sensor_price": 0,
+    "sensor_label": "接收器 + 感应器",
+    "sensor_label_en": "Receiver + Sensor",
+    "mm_per_ft": 304.8,
+    "default_unit": "m",
+    "units": [
+      {
+        "key": "m",
+        "name": "米",
+        "name_en": "m"
+      },
+      {
+        "key": "ft",
+        "name": "英尺",
+        "name_en": "ft"
+      }
+    ],
+    "note": "",
+    "note_en": ""
+  },
+  "prices": {
+    "custom_cabinet": {
+      "body_particle": {
+        "label": "ENF颗粒板柜体",
+        "label_en": "Particle Board Carcass",
+        "part": "body",
+        "supply": 0,
+        "market": [
+          0,
+          0
+        ],
+        "unit": "ft²",
+        "source": "",
+        "note": "",
+        "note_en": ""
+      },
+      "body_plywood": {
+        "label": "ENF多层板柜体",
+        "label_en": "Plywood Carcass",
+        "part": "body",
+        "supply": 0,
+        "market": [
+          0,
+          0
+        ],
+        "unit": "ft²",
+        "source": "",
+        "note": "",
+        "note_en": ""
+      },
+      "door_melamine": {
+        "label": "三聚氰胺柜门",
+        "label_en": "Melamine Door",
+        "part": "door",
+        "supply": 0,
+        "market": [
+          0,
+          0
+        ],
+        "unit": "ft²",
+        "source": "",
+        "note": "",
+        "note_en": ""
+      }
+    },
+    "wall_panel": {
+      "standard": {
+        "label": "护墙板",
+        "label_en": "Wall Panel",
+        "supply": 0,
+        "market": [
+          0,
+          0
+        ],
+        "unit": "ft²",
+        "source": "",
+        "note": "",
+        "note_en": ""
+      }
+    },
+    "base_cabinet": {
+      "particle": {
+        "label": "防潮颗粒板",
+        "label_en": "Moisture-resistant Particle Board",
+        "supply": 0,
+        "market": [
+          0,
+          0
+        ],
+        "unit": "ft",
+        "source": "",
+        "note": "",
+        "note_en": ""
+      },
+      "plywood": {
+        "label": "多层板",
+        "label_en": "Plywood",
+        "supply": 0,
+        "market": [
+          0,
+          0
+        ],
+        "unit": "ft",
+        "source": "",
+        "note": "",
+        "note_en": ""
+      }
+    },
+    "wall_cabinet": {
+      "particle": {
+        "label": "防潮颗粒板",
+        "label_en": "Moisture-resistant Particle Board",
+        "supply": 0,
+        "market": [
+          0,
+          0
+        ],
+        "unit": "ft",
+        "source": "",
+        "note": "",
+        "note_en": ""
+      },
+      "plywood": {
+        "label": "多层板",
+        "label_en": "Plywood",
+        "supply": 0,
+        "market": [
+          0,
+          0
+        ],
+        "unit": "ft",
+        "source": "",
+        "note": "",
+        "note_en": ""
+      }
+    }
+  },
+  "company": {
+    "name": "",
+    "name_cn": "",
+    "address": "",
+    "mobile": "",
+    "email": "",
+    "greeting": "",
+    "title": "",
+    "title_cn": "",
+    "logo": "",
+    "logo_width_px": 150,
+    "logo_height_px": 43,
+    "greeting_cn": "",
+    "address_cn": ""
+  },
+  "remark": {
+    "enabled": true,
+    "preliminary_note": "",
+    "title": "REMARK",
+    "items": [
+      {
+        "no": "1",
+        "label": "Payment Term",
+        "en": "",
+        "cn": "",
+        "label_cn": "付款方式"
+      },
+      {
+        "no": "2",
+        "label": "Delivery Time",
+        "en": "",
+        "cn": "",
+        "label_cn": "交货期"
+      },
+      {
+        "no": "3",
+        "label": "Warranty",
+        "en": "",
+        "cn": "",
+        "label_cn": "保修"
+      },
+      {
+        "no": "4",
+        "label": "Material",
+        "en": "",
+        "cn": "",
+        "label_cn": "材料"
+      },
+      {
+        "no": "5",
+        "label": "Validity period of quotation",
+        "en": "",
+        "cn": "",
+        "label_cn": "报价有效期"
+      }
+    ],
+    "note_title": "备注：",
+    "notes": [],
+    "title_cn": "条款",
+    "notes_cn": "备注",
+    "preliminary_note_cn": ""
+  },
+  "extras": {
+    "label": "增项",
+    "label_en": "Add-ons",
+    "groups": [
+      "cabinet",
+      "kitchen"
+    ],
+    "note": "",
+    "items": [
+      {
+        "key": "led",
+        "name": "灯带",
+        "name_en": "LED Strip",
+        "price": 0,
+        "unit": "m",
+        "basis": "qty",
+        "note": "",
+        "cats": [
+          "custom_cabinet",
+          "wall_panel",
+          "base_cabinet",
+          "wall_cabinet"
+        ],
+        "note_en": ""
+      },
+      {
+        "key": "led_power",
+        "name": "灯带电源",
+        "name_en": "LED Power Supply",
+        "price": 0,
+        "unit": "pcs",
+        "basis": "qty",
+        "note": "",
+        "cats": [
+          "custom_cabinet",
+          "wall_panel",
+          "base_cabinet",
+          "wall_cabinet"
+        ],
+        "note_en": ""
+      },
+      {
+        "key": "led_sensor",
+        "name": "接收器 + 感应器",
+        "name_en": "Receiver + Sensor",
+        "price": 0,
+        "unit": "pcs",
+        "basis": "qty",
+        "note": "",
+        "cats": [
+          "custom_cabinet",
+          "wall_panel",
+          "base_cabinet",
+          "wall_cabinet"
+        ],
+        "note_en": ""
+      },
+      {
+        "key": "glass_door",
+        "name": "玻璃门",
+        "name_en": "Glass Door",
+        "price": 0,
+        "unit": "ft2",
+        "basis": "area",
+        "note": "",
+        "cats": [
+          "custom_cabinet",
+          "base_cabinet",
+          "wall_cabinet"
+        ],
+        "note_en": ""
+      },
+      {
+        "key": "quartz",
+        "name": "石英石台面",
+        "name_en": "Quartz Countertop",
+        "price": 0,
+        "unit": "ft",
+        "basis": "length",
+        "note": "",
+        "cats": [
+          "base_cabinet"
+        ],
+        "note_en": ""
+      },
+      {
+        "key": "sink",
+        "name": "水槽",
+        "name_en": "Sink",
+        "price": 0,
+        "unit": "pcs",
+        "basis": "qty",
+        "note": "",
+        "cats": [
+          "base_cabinet"
+        ],
+        "note_en": ""
+      },
+      {
+        "key": "pull_down",
+        "name": "下拉架",
+        "name_en": "Pull-down Rack",
+        "price": 0,
+        "unit": "pcs",
+        "cats": [
+          "base_cabinet",
+          "wall_cabinet"
+        ],
+        "note_en": "",
+        "note": ""
+      },
+      {
+        "key": "tall_basket",
+        "name": "高柜联动拉篮",
+        "name_en": "Tall Cabinet Pull-out Basket",
+        "price": 0,
+        "unit": "pcs",
+        "cats": [
+          "base_cabinet",
+          "wall_cabinet"
+        ],
+        "note_en": "",
+        "note": ""
+      },
+      {
+        "key": "dish_basket",
+        "name": "碗碟拉篮",
+        "name_en": "Dish Basket",
+        "price": 0,
+        "unit": "pcs",
+        "cats": [
+          "base_cabinet",
+          "wall_cabinet"
+        ],
+        "note_en": "",
+        "note": ""
+      }
+    ]
+  },
+  "illustration": {
+    "label": "示意图",
+    "dim_unit": "mm",
+    "width_px": 176,
+    "height_px": 117,
+    "note": "导出报价单时按品类 + 实际尺寸自动生成示意图；dim_unit 可选 mm（与 Dimension 列同口径）或 ft。"
+  },
+  "totals": {
+    "show_discount_row": false,
+    "show_deposit_rows": false
+  }
+}
