@@ -4,8 +4,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'tests'))
 TMP=tempfile.TemporaryDirectory(prefix='whole-house-customization-selftest-')
-os.environ['WHOLE_HOUSE_CUSTOMIZATION_DATA_DIR']=str(Path(TMP.name)/'data')
-os.environ['WHOLE_HOUSE_CUSTOMIZATION_EXPORT_DIR']=str(Path(TMP.name)/'exports')
+os.environ['VOUGUER_NEXT_DATA_DIR']=str(Path(TMP.name)/'data')
+os.environ['VOUGUER_NEXT_EXPORT_DIR']=str(Path(TMP.name)/'exports')
 from server import store
 from server.independent import save_config,backup_payload,export_config,validate_config
 from core import Item,compute_quote
@@ -55,7 +55,7 @@ class StandaloneTests(unittest.TestCase):
                 for c in row:
                     if c.data_type=='f':self.assertIsNotNone(cached[s.title][c.coordinate].value)
     def test_backup_contains_independent_data(self):
-        b=backup_payload(self.c);self.assertEqual(b['format'],'Whole-House-Customization-Backup');self.assertIn('quote_items',b['tables']);self.assertIn('prices',b['pricing'])
+        b=backup_payload(self.c);self.assertEqual(b['format'],'VOUGUER-Backup');self.assertIn('quote_items',b['tables']);self.assertIn('prices',b['pricing'])
     def test_invalid_configuration_rejected(self):
         raw=copy.deepcopy(self.raw);raw['meta']['mm_per_ft']=0
         with self.assertRaises(ValueError):validate_config(raw)
@@ -79,7 +79,7 @@ class StandaloneTests(unittest.TestCase):
         ev=Evaluator(w);self.assertAlmostEqual(ev.cell(detail.title,'O5'),3.3)
         expected=compute_quote(cfg,[Item.from_dict({**it,'height_mm':500})])[0][0].amount
         self.assertAlmostEqual(ev.cell(detail.title,'V5'),expected,places=2)
-        it={**DEMO[4],'extras':{},'height_mm':1000,'nonstd':None}
+        it={**DEMO[0],'extras':{},'height_mm':1000,'nonstd':None}
         lines,summary=compute_quote(cfg,[Item.from_dict(it)])
         export_workbook(str(path),cfg,{'quote_no':'MUTABLE'},lines,summary,'internal')
         w=load_workbook(path);w['明细_Calculation']['J5']=914.4

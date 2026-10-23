@@ -32,13 +32,15 @@ def summary_sheet(ws,cfg,lines,summary,kind='internal'):
             if show:
                 refs=','.join('成本毛利_CostProfit!H'+str(4+i) for i,_ in members)
                 ws.cell(r,4,'=ROUND(SUM('+refs+'),2)').number_format='#,##0.00'
-                ws.cell(r,5,f'=C{r}-D{r}').number_format='#,##0.00'
+                complete=all(getattr(ln,'cost_complete',True) for _,ln in members)
+                ws.cell(r,5,f'=C{r}-D{r}' if complete else 'Missing cost / 成本待补').number_format='#,##0.00'
             ws.row_dimensions[r].height=34;r+=1
         ws.cell(r,1,bi('Subtotal','小计'))
         for c in range(2,6 if show else 4):
             from openpyxl.utils import get_column_letter
             letter=get_column_letter(c)
             ws.cell(r,c,f'=SUM({letter}{start}:{letter}{r-1})' if r>start else '=0').number_format='#,##0.00'
+        if show and summary.get('cost_complete') is False:ws.cell(r,5,'Missing cost / 成本待补')
         r+=2
     for c,w in {'A':48,'B':10,'C':20,'D':20,'E':20}.items():ws.column_dimensions[c].width=w
     style(ws)
@@ -48,10 +50,16 @@ def usage_sheet(ws,cfg,lines):
     ws['A2']=bi('Pricing measure for procurement; does not include cutting waste or a panel cutting list.','用于备料的计价用量，不含损耗；不等同于板材开料清单。');ws.merge_cells('A2:F2');ws.row_dimensions[2].height=35
     for c,t in enumerate([bi('Material','材料'),bi('Category','品类'),bi('Unit','单位'),bi('Total measure','用量合计'),bi('Rows','行数'),bi('Note','备注')],1):ws.cell(3,c,t)
     groups={}
-    for i,l in enumerate(lines):groups.setdefault((l.material_label,l.cat_key,l.unit),[]).append((i,l))
-    for r,(_,members) in enumerate(groups.items(),4):
-        first=members[0][1];ws.cell(r,1,bi(first.material_label_en,first.material_label));ws.cell(r,2,bi(first.cat_name_en,first.cat_name));ws.cell(r,3,first.unit)
-        ws.cell(r,4,'=ROUND('+ '+'.join('明细_Calculation!P{0}*明细_Calculation!R{0}*明细_Calculation!T{0}'.format(5+i) for i,_ in members)+',3)').number_format='#,##0.000'
+    for i,l in enumerate(lines):
+        mixed=getattr(l,'pricing_model','')=='kitchen_split'
+        groups.setdefault((l.body_label if mixed else l.material_label,l.cat_key,l.unit,'body'),[]).append((i,l))
+        if mixed and l.door_key:groups.setdefault((l.door_label,l.cat_key,'ft²','door'),[]).append((i,l))
+    for r,((label,_,unit,part),members) in enumerate(groups.items(),4):
+        first=members[0][1];mixed=getattr(first,'pricing_model','')=='kitchen_split'
+        english=first.door_label_en if part=='door' else first.body_label_en if mixed else first.material_label_en
+        ws.cell(r,1,bi(english,label));ws.cell(r,2,bi(first.cat_name_en,first.cat_name));ws.cell(r,3,unit)
+        a,b=('AC','AD') if part=='door' else ('P','R')
+        ws.cell(r,4,'=ROUND('+ '+'.join(f'明细_Calculation!{a}{5+i}*明细_Calculation!{b}{5+i}*明细_Calculation!T{5+i}' for i,_ in members)+',3)').number_format='#,##0.000'
         ws.cell(r,5,len(members));ws.row_dimensions[r].height=38
     for c,w in {'A':50,'B':25,'C':10,'D':20,'E':10,'F':30}.items():ws.column_dimensions[c].width=w
     style(ws)
@@ -67,6 +75,8 @@ def notes_sheet(ws,cfg,quote,summary,kind='internal'):
     line('Pricing rules','计价规则',True)
     line('Area items: length (ft) × billable height (ft) × depth factor × unit price × quantity. Optional door rates are added to the carcass rate.','面积类：长(ft) × 计价高(ft) × 深度系数 × 单价 × 数量；柜门单价另加到柜体单价。')
     line('Length items: length (ft) × non-standard factor × unit price × quantity.','长度类：长(ft) × 非标系数 × 单价 × 数量。')
+    if any(c.get('pricing_model')=='kitchen_split' for c in cfg.cat_list()):
+        line('Kitchen: carcass length (configured unit: ft; historical metre rates remain readable) × carcass rate × non-standard factor × quantity + doors using ordinary cabinet projection rules (ft²) + add-ons. Base cabinet plinth follows total length; handles are optional.','橱柜：柜体长度(按配置单位，新报价FT，历史米价保留) × 柜体单价 × 非标系数 × 数量＋柜门按普通柜投影规则(ft²)单独计算＋增项。地柜脚线跟随总长度自动计算，拉手选配。')
     for c in cfg.cat_list():
         line(f"{c.get('name_en',c['key'])}: depth {c.get('std_depth_mm',0)} mm; minimum billable height {c.get('min_height_ft',0)} ft.",f"{c.get('name',c['key'])}：标准深度 {c.get('std_depth_mm',0)} mm；最低计价高 {c.get('min_height_ft',0)} ft。")
     line(f'Non-standard multiplier: {cfg.nonstd_factor}; height tolerance: {cfg.height_tol} ft; 1 ft = {cfg.mm_per_ft} mm.',f'非标系数：{cfg.nonstd_factor}；高度容差：{cfg.height_tol} ft；1 ft = {cfg.mm_per_ft} mm。')
@@ -82,7 +92,10 @@ def notes_sheet(ws,cfg,quote,summary,kind='internal'):
     line('Quotation information','报价信息',True)
     line(f"Customer: {quote.get('customer','')} | Project: {quote.get('project','')}",f"客户：{quote.get('customer','')}；项目：{quote.get('project','')}")
     line(f"Reference: {quote.get('quote_no','')} | Date: {quote.get('quote_date','')} | Validity: {quote.get('valid_days',30)} days",f"编号：{quote.get('quote_no','')}；日期：{quote.get('quote_date','')}；有效期：{quote.get('valid_days',30)}天")
+    line('Exclusions','未含项目',True)
+    line('Tax, delivery, installation and hardware upgrades are excluded unless separately listed.','除非另行列明，报价不含税、运输、安装和五金升级。')
+    line('Quartz cut-outs, polishing and backsplash are charged separately. Final measurements must be confirmed on site.','石英石开孔、磨边、挡水另计，最终尺寸须现场复核。')
     line('Editable Excel formulas recalculate amounts. Cabinet pictures are embedded static previews; re-export after dimension changes to update pictures.','Excel金额保留可编辑公式并可重算。柜体图片为嵌入式静态图；修改尺寸后请重新导出以更新图片。')
-    line('Whole-House Customization Quotation Studio 3.0 — standalone local edition.','Whole-House Customization全屋定制报价3.0，本机独立版。')
+    line('Whole-House Quotation Studio 1.1.','全屋定制报价系统1.1。')
     for c in 'ABCDEF':ws.column_dimensions[c].width=21
     ws.page_setup.orientation='portrait';ws.page_setup.fitToWidth=1;ws.page_setup.fitToHeight=0

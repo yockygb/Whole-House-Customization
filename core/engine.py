@@ -2,11 +2,11 @@
 """
 全屋定制报价引擎 v2.0（原系统 quote_engine.py 的等价迁移）
 =========================================================
-本模块的**计价逻辑、公式、系数、取价策略与原系统完全一致**，
-逐行迁移自 the original quotation engine，仅做三件事：
+本模块的**计价逻辑、公式、默认单价、系数、取价策略与原系统完全一致**，
+逐行迁移自 C:\\Users\\ASUS\\wb-quote\\quote_engine.py，仅做三件事：
 
 1. 改成包内相对导入（floors / cab_name）；
-2. 增加只读的「材料价格覆盖」钩子（override），不传时使用本机配置；
+2. 增加只读的「材料价格覆盖」钩子（override），不传时行为与原系统 100% 相同；
 3. 增加 compute_quote()，把折扣 / 定金 / 税费预留一并汇总（金额口径与原系统一致）。
 
 计价规则（不得修改）
@@ -24,16 +24,16 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass, asdict, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from .cab_name import resolve_cabinet_name_en
-from .floors import floor_name_en, floor_rank, normalize_floor
-from .rooms import room_en as resolve_room_en
+from .cab_name import resolve_bilingual_cabinet_name
+from .floors import floor_name_en, normalize_floor
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_CONFIG = os.path.join(BASE_DIR, "data", "pricing.json")
+DEFAULT_CONFIG = os.path.join(BASE_DIR, "data", "factory-pricing.json")
 
 # 输入单位 -> mm
 UNIT_TO_MM = {"mm": 1.0, "cm": 10.0, "inch": 25.4, "ft": 304.8, "m": 1000.0}
@@ -73,6 +73,12 @@ class PricingConfig:
     def cat_list(self) -> List[Dict[str, Any]]:
         return [self.categories[k] for k in self._cat_order]
 
+    def for_category(self, key):
+        scoped = self.raw.get('kitchen_pricing')
+        if scoped and self.category(key).get('source_key'):
+            return PricingConfig(scoped, overrides=self.overrides)
+        return self
+
     def category(self, key: str) -> Dict[str, Any]:
         if key not in self.categories:
             raise KeyError("未知品类: %s" % key)
@@ -106,6 +112,8 @@ class PricingConfig:
         return self.prices.get(cat_key, {}) or {}
 
     def is_split(self, cat_key: str) -> bool:
+        model = self.category(cat_key).get("pricing_model")
+        if model: return model in ("projection_split", "kitchen_split")
         return any(v.get("part") == "door" for v in self._table(cat_key).values())
 
     def body_options(self, cat_key: str) -> List[Tuple[str, str]]:
@@ -163,8 +171,18 @@ class PricingConfig:
         return [r.get("name", "") for r in self.rooms()]
 
     def room_en(self, name: str) -> str:
-        known = {r.get("name", ""): r.get("name_en", "") for r in self.rooms()}
-        return resolve_room_en(name, known)
+        raw = str(name or "").strip()
+        rooms = self.rooms()
+        for r in rooms:
+            if r.get("name") == raw:
+                return r.get("name_en", raw)
+        for r in sorted(rooms, key=lambda x: len(str(x.get("name", ""))), reverse=True):
+            base = str(r.get("name", "")).strip()
+            if raw.startswith(base):
+                number = raw[len(base):].strip().lstrip("#").strip()
+                if base and number.isdigit():
+                    return "%s %s" % (r.get("name_en") or base, number)
+        return raw
 
     def mode_label_en(self, mode: Optional[str] = None) -> str:
         return self.meta.get("price_modes_en", {}).get(
@@ -226,17 +244,21 @@ class PricingConfig:
     def extras_groups(self) -> List[str]:
         return self.extras_meta().get("groups", ["kitchen"]) or []
 
-    def extras_for(self, cat_key: str) -> List[Dict[str, Any]]:
+    def extras_for(self, cat_key: str, selected_keys=()) -> List[Dict[str, Any]]:
         try:
             grp = self.group_of(cat_key)
         except Exception:
             return []
         if grp not in self.extras_groups():
             return []
+        selected_keys = set(selected_keys or ())
         out = []
-        for it in self.extras_items():
+        items = list(self.extras_meta().get("items", []) or []) + list(self.extra_extras or [])
+        for it in items:
+            if not it.get("enabled", True) and it.get("key") not in selected_keys:
+                continue
             cats = it.get("cats")
-            if cats and cat_key not in cats:
+            if cats and cat_key not in cats and it.get("key") not in selected_keys:
                 continue
             out.append(it)
         return out
@@ -373,7 +395,7 @@ class Item:
             led_price=(float(lp) if lp not in (None, "") else None),
             led_power=bool(d.get("led_power", False)),
             led_sensor=bool(d.get("led_sensor", False)),
-            extras={str(k): int(v or 0) for k, v in (d.get("extras") or {}).items()},
+            extras={str(k): float(v or 0) for k, v in (d.get("extras") or {}).items()},
             extras_size={str(k): {str(kk): float(vv or 0) for kk, vv in (v or {}).items()}
                          for k, v in (d.get("extras_size") or {}).items()},
             cab_name=d.get("cab_name", "") or "",
@@ -550,7 +572,7 @@ def compute_line(cfg: PricingConfig, item: Item, idx: int = 1,
             if check_h and std_h and h_ft > 0 and abs(h_ft - float(std_h)) > cfg.height_tol:
                 nonstd = True
                 reasons.append("高度%.2fft≠标准%.2fft" % (h_ft, float(std_h)))
-            if std_d_mm and item.depth_mm > std_d_mm + 10:
+            if std_d_mm and item.depth_mm > std_d_mm + float(cat.get("depth_tolerance_mm", 10)):
                 nonstd = True
                 reasons.append("深度%.0fmm>标准%.0fmm" % (item.depth_mm, std_d_mm))
         if nonstd:
@@ -625,7 +647,7 @@ def compute_line(cfg: PricingConfig, item: Item, idx: int = 1,
     # ---- 增项（玻璃门 / 石英石 / 水槽 / 下拉架 / 高柜拉篮 / 碗碟拉篮）----
     extras_list: List[Dict[str, Any]] = []
     extras_amount = 0.0
-    for ex in cfg.extras_for(item.cat):
+    for ex in cfg.extras_for(item.cat, (item.extras or {}).keys()):
         key = ex.get("key", "")
         q = int((item.extras or {}).get(key, 0) or 0)
         if q <= 0:
@@ -633,8 +655,14 @@ def compute_line(cfg: PricingConfig, item: Item, idx: int = 1,
         p = float(ex.get("price", 0) or 0)
         basis_kind = ex.get("basis", "qty") or "qty"
         size_mm = (0.0, 0.0)
+        custom_length_mm = None
         if basis_kind == "length":
-            raw = l_ft * q
+            sz = (item.extras_size or {}).get(key) or {}
+            if key == "quartz" and "l_mm" in sz:
+                custom_length_mm = float(sz['l_mm'])
+                if not math.isfinite(custom_length_mm) or custom_length_mm <= 0:
+                    raise ValueError('Quartz length must be positive mm, or leave blank for cabinet length / 石英石长度须大于零（毫米），或清空以跟随柜体长度')
+            raw = (custom_length_mm / mft if custom_length_mm is not None else l_ft) * q
             ex_measure = _r(raw, 4)
             amt = _r(p * raw, 2)
             unit_txt = "ft"
@@ -663,8 +691,11 @@ def compute_line(cfg: PricingConfig, item: Item, idx: int = 1,
                             "basis": basis_kind, "measure": ex_measure,
                             "unit": unit_txt,
                             "w_mm": size_mm[0], "h_mm": size_mm[1]})
+        if custom_length_mm is not None:
+            extras_list[-1]['l_mm'] = custom_length_mm
     extras_text = "、".join(
-        ("%s %.2fft" % (e["name"], e["measure"])) if e["basis"] == "length"
+        ("%s %gmm × %d (%.2fft)" % (e['name'], e['l_mm'], e['qty'], e['measure'])) if e['basis'] == 'length' and e.get('l_mm')
+        else ("%s %.2fft" % (e["name"], e["measure"])) if e["basis"] == "length"
         else ("%s %d×%dmm %.2fft²" % (e["name"], round(e["w_mm"]), round(e["h_mm"]),
                                       e["measure"])) if e["basis"] == "area" and e["w_mm"]
         else ("%s %.2fft²" % (e["name"], e["measure"])) if e["basis"] == "area"
@@ -690,13 +721,15 @@ def compute_line(cfg: PricingConfig, item: Item, idx: int = 1,
     else:
         mat_label, mat_label_en = body_label, body_label_en
 
+    cabinet_name_en, cabinet_name_cn = resolve_bilingual_cabinet_name(
+        item.cab_name, item.cab_name_en, cfg.raw.get("cabinet_name_glossary", {}))
     return LineResult(
         min_height_enabled=item.apply_min_height, nonstd_override=item.nonstd,
         item_note_en=item.note_en, room_note_en=item.room_note_en,
         idx=idx, room=item.room, group=cfg.group_name(item.cat),
         cat_key=item.cat, cat_name=cat.get("name", item.cat),
-        cab_name=(item.cab_name or "").strip(),
-        cab_name_en=resolve_cabinet_name_en(item.cab_name, item.cab_name_en),
+        cab_name=cabinet_name_cn,
+        cab_name_en=cabinet_name_en,
         floor=normalize_floor(item.floor),
         floor_en=cfg.floor_en(item.floor),
         material=body_key, material_label=mat_label,
@@ -750,9 +783,8 @@ def compute_line(cfg: PricingConfig, item: Item, idx: int = 1,
 
 def compute_all(cfg: PricingConfig, items: List[Item],
                 mode: Optional[str] = None) -> Tuple[List[LineResult], Dict[str, Any]]:
-    # 统一按楼层排序（B2 → B1 → GF → 1F … → RF → 自定义），同层保持录入顺序
-    ordered = sorted(items, key=lambda it: floor_rank(it.floor))
-    lines = [compute_line(cfg, it, i + 1, mode) for i, it in enumerate(ordered)]
+    # Preserve the saved quotation order; moving a line must not change its pricing.
+    lines = [compute_line(cfg, it, i + 1, mode) for i, it in enumerate(items)]
     group_totals: Dict[str, float] = {}
     for ln in lines:
         group_totals[ln.group] = group_totals.get(ln.group, 0.0) + ln.amount

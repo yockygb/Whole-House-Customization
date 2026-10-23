@@ -12,30 +12,40 @@ def finalize_workbook(wb,cfg,quote,kind,lines=None):
     ws=wb.worksheets[0]
     ref=load_workbook(Path(BASE_DIR)/'templates'/'quotation-reference.xlsx').worksheets[0]
     # Keep the old template's geometry, stationery positions and print settings.
-    for key,dim in ref.column_dimensions.items():ws.column_dimensions[key].width=dim.width
+    for key,dim in ref.column_dimensions.items():
+        col=ord(key)-64
+        target=chr(col+65) if col>=2 else key
+        ws.column_dimensions[target].width=dim.width
+    ws.column_dimensions['B'].width=12
     for r in range(1,9):ws.row_dimensions[r].height=ref.row_dimensions[r].height
     for r in range(1,7):
-        for c in range(1,11):
-            src=ref.cell(r,c);dst=ws.cell(r,c)
+        for c in range(1,12):
+            src_col=c if c<=8 else (8 if c==9 else c-1)
+            src=ref.cell(r,src_col);dst=ws.cell(r,c)
             if src.has_style:dst._style=copy(src._style)
     ws.page_margins=copy(ref.page_margins);ws.page_setup=copy(ref.page_setup)
     ws.print_title_rows=ref.print_title_rows
     template=cfg.raw.get('template',{})
     for col,width in template.get('column_widths',{}).items():
-        if col in 'ABCDEFGHIJ' and 3<=float(width)<=70:ws.column_dimensions[col].width=float(width)
-    # Keep the exact ten English headings from the old sheet; Chinese is secondary.
+        target=chr(ord(col)+1) if col in 'BCDEFGHIJ' else col
+        if target in 'ABCDEFGHIJK' and 3<=float(width)<=70:
+            ws.column_dimensions[target].width=float(width)
+    # Keep the old headings and add Area before Product; Chinese remains secondary.
     from export.xlsx import _bi
-    labels=[('NO.','序号'),('Product','产品名称'),('Picture','图片'),('Description','描述'),
-            ('Dimension(L*H*D)mm','长*高*深 (mm)'),('Projected area','投影面积'),
-            ('Unit','单位'),('QTY','数量'),('Price','单价'),('Remark','备注')]
+    labels=[('NO.','序号'),('Area','区域'),('Product','产品名称'),('Picture','图片'),
+            ('Description','描述'),('Dimension(L*H*D)mm','长*高*深 (mm)'),
+            ('Projected area','投影面积'),('Unit','单位'),('QTY','数量'),
+            ('Price','单价'),('Remark','备注')]
+    if any(getattr(ln,'pricing_model','')=='kitchen_split' for ln in lines or []):
+        labels[6]=('Measure','计费量')
     for c,(en,cn) in enumerate(labels,1):ws.cell(8,c).value=_bi(en,cn,en_size=9,en_bold=True)
     if quote.get('note_en') or quote.get('note') or quote.get('terms_en') or quote.get('terms'):
         r=ws.max_row+2
-        ws.merge_cells(start_row=r,start_column=1,end_row=r,end_column=10)
+        ws.merge_cells(start_row=r,start_column=1,end_row=r,end_column=11)
         ws.cell(r,1).value=_bi('Project notes & terms','项目备注与条款',en_bold=True)
         for en,cn in ((quote.get('note_en',''),quote.get('note','')),(quote.get('terms_en',''),quote.get('terms',''))):
             if en or cn:
-                r+=1;ws.merge_cells(start_row=r,start_column=1,end_row=r,end_column=10)
+                r+=1;ws.merge_cells(start_row=r,start_column=1,end_row=r,end_column=11)
                 ws.cell(r,1).value=_bi(en,cn);ws.cell(r,1).alignment=Alignment(wrap_text=True,vertical='top')
                 ws.row_dimensions[r].height=max(30,14*((len(en)+len(cn)*2)//130+2))
     # Translation lookup is drawn from the user's independently editable data.
@@ -56,9 +66,9 @@ def finalize_workbook(wb,cfg,quote,kind,lines=None):
     by_index={ln.idx:ln for ln in lines or []}
     for row in ws:
         index=row[0].value
-        if isinstance(index,int) and index in by_index and row[1].value is not None:
+        if isinstance(index,int) and index in by_index and row[2].value is not None:
             en,cn=remark(by_index[index],cfg)
-            ws.cell(row[0].row,10).value=_rt_lines([(en,False),(cn,True)],en_size=8)
+            ws.cell(row[0].row,11).value=_rt_lines([(en,False),(cn,True)],en_size=8)
     # Render company-supplied bilingual captions without dropping either language.
     co=cfg.company()
     for row,key,cn_key in ((1,'name','name_cn'),(2,'address','address_cn')):
@@ -89,7 +99,7 @@ def finalize_workbook(wb,cfg,quote,kind,lines=None):
         if kind=='customer':detail['A1']='Calculation detail / 计算明细'
         for n,ln in enumerate(lines or [],5):
             if ln.room_note or ln.room_note_en:detail.cell(n,4).value=(ln.room_note_en or 'English translation needed')+'\n'+ln.room_note
-            if ln.extras_list or getattr(ln, 'led_type', 'none') != 'none':
+            if ln.extras_list or getattr(ln, 'led_type', 'none') != 'none' or getattr(ln,'pricing_model','')=='kitchen_split':
                 en,cn=remark(ln,cfg)
                 detail.cell(n,23).value=en+'\n'+cn
     wb.calculation.fullCalcOnLoad=True

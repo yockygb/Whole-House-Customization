@@ -317,7 +317,7 @@ def _write_price_sheet(ws, cfg, mode: Optional[str], include_cost: bool):
 # ------------------------------------------------------------------ 明细（内部版，公式源）
 def _write_detail_sheet(ws, cfg, lines, price_rows: Dict[Any, int],
                         addon_rows: Optional[Dict[str, int]] = None) -> None:
-    ncols = 27
+    ncols = 28
     last_col = get_column_letter(ncols)
     ws["A1"] = "计算明细（内部用 · 改这里全表重算） / CALCULATION DETAIL (INTERNAL)"
     ws["A1"].font = Font(bold=True, size=15, color=NAVY)
@@ -342,7 +342,7 @@ def _write_detail_sheet(ws, cfg, lines, price_rows: Dict[Any, int],
              "计价量\nMeasure", "单位\nUnit", "系数\nFactor", "单价\nUnit Price",
              "数量\nQty", "增项金额\nAdd-ons", "金额\nAmount", "增项明细\nAdd-on Detail",
              "备注 / 计价过程\nNote / Calc", "柜体金额\nCarcass", "柜门金额\nDoor",
-             "灯带金额\nLED"]
+             "灯带金额\nLED", "Quartz length (mm)\n石英石长度（留空随柜体）"]
     for i, h in enumerate(heads, 1):
         ws.cell(row=4, column=i, value=h)
     _style_header(ws, 4, ncols, 40)
@@ -421,6 +421,11 @@ def _write_detail_sheet(ws, cfg, lines, price_rows: Dict[Any, int],
         c.number_format = MONEY
         ws.cell(row=r, column=20, value=int(ln.qty))
 
+        quartz = next((e for e in ln.extras_list if e.get('key') == 'quartz' and e.get('basis') == 'length'), None)
+        ws.cell(row=r, column=28, value=quartz.get('l_mm') if quartz else None).number_format = '#,##0.####'
+        if quartz:
+            ws.cell(row=r, column=28).fill = FILL_INPUT
+
         # 增项金额（公式：单价引用价格表增项区块，改单价即联动；长/高变化也联动）
         if ln.extras_list:
             terms = []
@@ -430,7 +435,10 @@ def _write_detail_sheet(ws, cfg, lines, price_rows: Dict[Any, int],
                 p = ("%s!$H$%d" % (SHEET_P, arow)) if arow else ("%.10g" % float(e.get("price", 0) or 0))
                 q = int(e.get("qty", 1) or 1)
                 if e.get("basis") == "length":
-                    terms.append("ROUND(%s*L%d*%d,2)" % (p, r, q))
+                    if key == 'quartz':
+                        terms.append('ROUND(%s*IF(SUM(AB%d)>0,SUM(AB%d)/%.10g,L%d)*%d,2)' % (p, r, r, mft, r, q))
+                    else:
+                        terms.append("ROUND(%s*L%d*%d,2)" % (p, r, q))
                 elif e.get("basis") == "area":
                     w_mm = float(e.get("w_mm", 0) or 0)
                     h_mm = float(e.get("h_mm", 0) or 0)
@@ -591,7 +599,7 @@ def _write_detail_sheet(ws, cfg, lines, price_rows: Dict[Any, int],
     widths = {"A": 5, "B": 10, "C": 12, "D": 16, "E": 14, "F": 18, "G": 14, "H": 26,
               "I": 9, "J": 9, "K": 9, "L": 8, "M": 8, "N": 8, "O": 9, "P": 10, "Q": 6,
               "R": 7, "S": 11, "T": 6, "U": 12, "V": 13, "W": 30, "X": 46, "Y": 12,
-              "Z": 12, "AA": 11}
+              "Z": 12, "AA": 11, "AB": 20}
     for k, v in widths.items():
         ws.column_dimensions[k].width = v
     ws.freeze_panes = "A5"
@@ -607,10 +615,10 @@ def _write_detail_sheet(ws, cfg, lines, price_rows: Dict[Any, int],
 
 
 # ------------------------------------------------------------------ 报价单（客户版）
-# 版式严格对齐原系统 Whole-House Customization 报价清单：
-#   A1:B4 logo 图片 | C1:H1 公司名 | I1 DATE | I2 Reference No
-#   A5 ATTN + Project | A6 greeting | A7 标题条 | 第 8 行表头（10 列，含 Picture 图片）
-#   楼层分组行 → 数据行（C 列贴示意图）→ 产品合计 → 预报价声明 → Remark → 备注
+# 版式严格对齐原系统 Vouguer 报价清单：
+#   A1:B4 logo 图片 | C1:I1 公司信息 | J1:K1 日期与单号
+#   A5 ATTN + Project | A6 greeting | A7 标题条 | 第 8 行表头（11 列，含 Picture 图片）
+#   楼层分组行 → 数据行（D 列贴示意图）→ 产品合计 → 预报价声明 → Remark → 备注
 # C 列图片由 illustration.py 按「品类 + 实际长高深」生成，图内含宽/高/深标注。
 
 PIC_W, PIC_H = 176, 117          # Excel 中默认显示尺寸（px），与 C 列宽度匹配
@@ -647,7 +655,7 @@ def _est_height(text: str, cols: int = 150, line_h: int = 13, pad: int = 5) -> i
     return lines * line_h + pad
 
 
-def _qline(ws, r: int, text: str, ncols: int = 10, *, bold=False, size=9,
+def _qline(ws, r: int, text: str, ncols: int = 11, *, bold=False, size=9,
            align=None, border=False, height=None, color="000000", cols=150) -> None:
     """整行合并写一段说明文字（Remark / 备注 用）。"""
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncols)
@@ -660,7 +668,7 @@ def _qline(ws, r: int, text: str, ncols: int = 10, *, bold=False, size=9,
     ws.row_dimensions[r].height = height if height is not None else _est_height(text, cols)
 
 
-def _qline_rich(ws, r: int, lines, ncols: int = 10, *, en_size: float = 9,
+def _qline_rich(ws, r: int, lines, ncols: int = 11, *, en_size: float = 9,
                 cols: int = 150) -> None:
     """整行合并写「英主中辅」富文本（条款 / 备注 用），行高按行数自动估。"""
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncols)
@@ -671,7 +679,7 @@ def _qline_rich(ws, r: int, lines, ncols: int = 10, *, en_size: float = 9,
     ws.row_dimensions[r].height = _est_height(txt, cols, 13, 5)
 
 
-def _write_floor_header(ws, r: int, floor: str, ncols: int = 10,
+def _write_floor_header(ws, r: int, floor: str, ncols: int = 11,
                         sub_formula: Optional[str] = None, count: int = 0, cfg=None) -> None:
     """楼层分组标题行 —— **严格对齐样例 A9**。
 
@@ -725,7 +733,7 @@ def _pic_path(ln, pic_dir: str, unit: str = "mm") -> str:
 def _add_pic(ws, ln, r: int, pic_dir: str,
              w_px: int = PIC_W, h_px: int = PIC_H, unit: str = "mm",
              row_h_pt: float = 0.0) -> bool:
-    """把该行示意图贴到 C 列（图片位）：精确尺寸 + 单元格内居中。
+    """把该行示意图贴到 D 列（图片位）：精确尺寸 + 单元格内居中。
 
     row_h_pt 已知时按「(行高px - 图高) / 2」垂直居中，避免图片贴住上边框。
     失败时静默跳过，不影响其余内容。
@@ -742,7 +750,7 @@ def _add_pic(ws, ln, r: int, pic_dir: str,
         if row_h_pt:
             off_y = max(2, int((row_h_pt * 4.0 / 3.0 - h_px) / 2.0))
         img.anchor = OneCellAnchor(
-            _from=AnchorMarker(col=2, row=r - 1,
+            _from=AnchorMarker(col=3, row=r - 1,
                                colOff=pixels_to_EMU(4), rowOff=pixels_to_EMU(off_y)),
             ext=XDRPositiveSize2D(pixels_to_EMU(w_px), pixels_to_EMU(h_px)))
         ws.add_image(img)
@@ -752,7 +760,7 @@ def _add_pic(ws, ln, r: int, pic_dir: str,
         try:
             img = XLImage(_pic_path(ln, pic_dir, unit))
             img.width, img.height = w_px, h_px
-            ws.add_image(img, "C%d" % r)
+            ws.add_image(img, "D%d" % r)
             return True
         except Exception:
             return False
@@ -762,8 +770,8 @@ def _write_quote_sheet(ws, cfg, quote, lines, summary, discount, deposit_rate,
                        pic_dir: str = "", sum_rows: Optional[Dict[str, int]] = None) -> None:
     """报价单：眉头 + 英主中辅表头 + 楼层分组小计 + 产品合计 / 折扣 / 定金 + 条款。
 
-    版式对齐原系统 Whole-House Customization 报价清单，但语言顺序改为「英文主、中文辅」：
-      A1:B4 logo | C1:H1 公司名 | C2 地址 | C3 电话 | C4 邮箱 | I1 DATE | I2 REF
+    版式对齐原系统 Vouguer 报价清单，但语言顺序改为「英文主、中文辅」：
+      A1:B4 logo | C1:I1 公司信息 | J1:K1 日期 / 单号
       A5 ATTN / PROJECT | A6 greeting | A7 标题条
       第 8 行表头（EN 大字深色 + CN 小字浅灰，同一格两行）
       明细行：A 序号 | B 柜体名 | C 示意图 | D 描述 | E 尺寸 | F 投影面积
@@ -774,15 +782,15 @@ def _write_quote_sheet(ws, cfg, quote, lines, summary, discount, deposit_rate,
     co = cfg.company()
     rk = cfg.remark()
     ill = cfg.illustration()
-    ncols = 10
+    ncols = 11
     pic_w = int(ill.get("width_px", PIC_W) or PIC_W)
     pic_h = int(ill.get("height_px", PIC_H) or PIC_H)
     pic_unit = ill.get("dim_unit", "mm") or "mm"
     row_h = max(PIC_ROW_H, int(pic_h * 0.78) + 6)
     sum_rows = sum_rows or {}
 
-    widths = {"A": 5.5, "B": 22, "C": 26, "D": 36, "E": 20, "F": 12, "G": 7,
-              "H": 7, "I": 16, "J": 30}
+    widths = {"A": 5.5, "B": 12, "C": 22, "D": 26, "E": 36, "F": 20, "G": 12,
+              "H": 7, "I": 7, "J": 16, "K": 30}
     for k, v in widths.items():
         ws.column_dimensions[k].width = v
 
@@ -802,49 +810,49 @@ def _write_quote_sheet(ws, cfg, quote, lines, summary, discount, deposit_rate,
     for rr in (1, 2, 3, 4):
         ws.row_dimensions[rr].height = 12
 
-    ws.merge_cells("C1:H1")
+    ws.merge_cells("C1:I1")
     c = ws["C1"]
     c.value = co.get("name", "")
     c.font = Font(bold=True, size=13)
     c.alignment = Alignment(horizontal="left", vertical="bottom")
 
     for rr, key in ((2, "address"), (3, "mobile"), (4, "email")):
-        ws.merge_cells("C%d:H%d" % (rr, rr))
+        ws.merge_cells("C%d:I%d" % (rr, rr))
         c = ws.cell(row=rr, column=3, value=co.get(key, ""))
         c.font = Font(size=8.5)
         c.alignment = Alignment(horizontal="left", vertical="center")
 
     # 右上：日期 / 单号（英文标签）
-    ws.merge_cells("I1:J1")
-    ws.merge_cells("I2:J2")
-    ws["I1"] = "DATE: %s" % _en_date(quote.get("quote_date", ""))
-    ws["I1"].font = Font(bold=True, size=9)
-    ws["I1"].alignment = Alignment(horizontal="right", vertical="bottom")
-    ws["I2"] = "REFERENCE NO.: %s" % (quote.get("quote_no", "") or "")
-    ws["I2"].font = Font(bold=True, size=9)
-    ws["I2"].alignment = Alignment(horizontal="right", vertical="center")
+    ws.merge_cells("J1:K1")
+    ws.merge_cells("J2:K2")
+    ws["J1"] = "DATE: %s" % _en_date(quote.get("quote_date", ""))
+    ws["J1"].font = Font(bold=True, size=9)
+    ws["J1"].alignment = Alignment(horizontal="right", vertical="bottom")
+    ws["J2"] = "REFERENCE NO.: %s" % (quote.get("quote_no", "") or "")
+    ws["J2"].font = Font(bold=True, size=9)
+    ws["J2"].alignment = Alignment(horizontal="right", vertical="center")
 
     # ATTN / PROJECT
     attn = "ATTN: %s" % (quote.get("customer", "") or "")
     if quote.get("project"):
         attn += "    PROJECT: %s" % quote["project"]
-    ws.merge_cells("A5:J5")
+    ws.merge_cells("A5:K5")
     ws["A5"] = attn
     ws["A5"].font = Font(bold=True, size=9)
     ws["A5"].alignment = Alignment(horizontal="left", vertical="bottom")
     ws.row_dimensions[5].height = 20
 
-    ws.merge_cells("A6:J6")
+    ws.merge_cells("A6:K6")
     ws["A6"] = co.get("greeting", "")
     ws["A6"].font = Font(size=9)
     ws["A6"].alignment = Alignment(horizontal="left", vertical="center")
     ws.row_dimensions[6].height = 18
 
     # 标题条：QUOTATION 大字 + 报价单 小字（同一格两行，英文在上）
-    ws.merge_cells("A7:J7")
+    ws.merge_cells("A7:K7")
     t = ws["A7"]
     title_en = co.get("title", "QUOTATION") or "QUOTATION"
-    t.value = _bi(title_en, (co.get("title_cn") or "报价单"), en_size=12, en_bold=True)
+    t.value = _bi(title_en, co.get("title_cn","报价单"), en_size=12, en_bold=True)
     t.font = Font(bold=True, size=12)
     t.alignment = CENTER
     for cc in range(1, ncols + 1):
@@ -856,6 +864,7 @@ def _write_quote_sheet(ws, cfg, quote, lines, summary, discount, deposit_rate,
     # ---------- 表头（EN 主 + CN 辅） ----------
     heads = [
         ("NO.", "序号"),
+        ("AREA", "区域"),
         ("PRODUCT", "产品名称"),
         ("PICTURE", "示意图"),
         ("DESCRIPTION", "描述"),
@@ -904,7 +913,14 @@ def _write_quote_sheet(ws, cfg, quote, lines, summary, discount, deposit_rate,
 
         ws.cell(row=r, column=1, value=ln.idx)
 
-        # B：产品 = 「品类 · 柜体名称」，英文在上、中文在下（与样例同内容，仅换序）
+        # B：区域/房间（不含楼层）；C：产品 = 「品类 · 柜体名称」
+        area_en = (ln.room_en or "").strip()
+        area_cn = (ln.room or "").strip()
+        if not area_en or area_en == area_cn:
+            area_en = room_en_of(area_cn)
+        ws.cell(row=r, column=2,
+                value=_rt_lines([(area_en, False), (area_cn, True)], en_size=8.5))
+
         cat_en = (ln.cat_name_en or "").strip()
         cat_cn = (ln.cat_name or "").strip()
         cab_en = (ln.cab_name_en or "").strip()
@@ -921,24 +937,20 @@ def _write_quote_sheet(ws, cfg, quote, lines, summary, discount, deposit_rate,
             prod_en, prod_cn = ("%s · %s" % (cat_en, cab_en) if cat_en else cab_en), cat_cn
         else:                              # 只有中文名 → 英文行不给中文，避免冒充英文
             prod_en, prod_cn = cat_en, ("%s · %s" % (cat_cn, cab_cn) if cab_cn else cat_cn)
-        ws.cell(row=r, column=2,
+        ws.cell(row=r, column=3,
                 value=_rt_lines([(prod_en, False), (prod_cn, True)], en_size=9))
 
-        # C：示意图（行高确定后再贴，图片才能垂直居中）
-        ws.cell(row=r, column=3, value="")
+        # D：示意图（行高确定后再贴，图片才能垂直居中）
+        ws.cell(row=r, column=4, value="")
 
-        # D：描述（**英文整块在上、中文整块在下**，不逐条穿插）
-        floor_en = (ln.floor_en or "").strip() or floor_name_en(ln.floor)
-        room_en = (ln.room_en or "").strip()
-        if not room_en or room_en == (ln.room or "").strip():
-            room_en = room_en_of(ln.room)          # 主卫 / 次卫 / 保姆房… 兜底
+        # E：描述（楼层和区域单独列出；描述只保留材质与备注）
         mat_en = (ln.material_label_en or "").strip()
         mat_cn = (ln.material_label or "").strip()
         if mat_en == mat_cn:
             mat_en = ""
 
-        en_block = [x for x in (" · ".join([e for e in (floor_en, room_en) if e]), mat_en) if x]
-        cn_block = [" · ".join([c for c in (ln.floor, ln.room) if c])]
+        en_block = [mat_en] if mat_en else []
+        cn_block = []
         if mat_cn:
             cn_block.append(mat_cn)
         if ln.room_note_en:
@@ -946,31 +958,31 @@ def _write_quote_sheet(ws, cfg, quote, lines, summary, discount, deposit_rate,
         if ln.room_note:
             cn_block.append(ln.room_note)
         dl = [(t, False) for t in en_block] + [(t, True) for t in cn_block if t]
-        ws.cell(row=r, column=4, value=_rt_lines(dl, en_size=8.5))
+        ws.cell(row=r, column=5, value=_rt_lines(dl, en_size=8.5))
 
-        # E：尺寸（高或深为 0 自动省略）
-        ws.cell(row=r, column=5,
+        # F：尺寸（高或深为 0 自动省略）
+        ws.cell(row=r, column=6,
                 value='=IF(AND({d}!J{r}=0,{d}!K{r}=0),{d}!I{r},'
                       'IF({d}!J{r}=0,{d}!I{r}&"*"&{d}!K{r},'
                       '{d}!I{r}&"*"&{d}!J{r}&"*"&{d}!K{r}))'
                       .format(d=SHEET_D, r=dr))
-        # F/G/H：投影面积 / 单位 / 数量
+        # G/H/I：投影面积 / 单位 / 数量
         if measure_type == "pcs":
-            ws.cell(row=r, column=6, value="/")
+            ws.cell(row=r, column=7, value="/")
         else:
-            ws.cell(row=r, column=6,
+            ws.cell(row=r, column=7,
                     value="=%s!P%d" % (SHEET_D, dr)).number_format = NUM2
-        ws.cell(row=r, column=7, value="=%s!Q%d" % (SHEET_D, dr))
-        ws.cell(row=r, column=8,
+        ws.cell(row=r, column=8, value="=%s!Q%d" % (SHEET_D, dr))
+        ws.cell(row=r, column=9,
                 value="=%s!T%d" % (SHEET_D, dr)).number_format = '0'
-        # I：单价 = 该行金额 ÷ 数量（数量 1 时即整行金额）
-        c = ws.cell(row=r, column=9,
+        # J：单价 = 该行金额 ÷ 数量（数量 1 时即整行金额）
+        c = ws.cell(row=r, column=10,
                     value="=ROUND(%s!V%d/%s!T%d,2)" % (SHEET_D, dr, SHEET_D, dr))
         c.number_format = MONEY
         if ln.price_override:
             c.fill = FILL_INPUT
 
-        # J：备注（英文块在上：LED strip / power supply / sensor；中文块在下：增项、行备注、标记）
+        # K：备注（英文块在上：LED strip / power supply / sensor；中文块在下：增项、行备注、标记）
         en_bits, cn_bits = [], []
         if ln.led_amount > 0:
             en_bits.append("LED strip %g%s" % (ln.led_qty, cfg.led_unit_name(ln.led_unit)))
@@ -991,32 +1003,30 @@ def _write_quote_sheet(ws, cfg, quote, lines, summary, discount, deposit_rate,
             rl.append(("Incl. " + ", ".join(en_bits), False))
         if cn_bits:
             rl.append(("含 " + "，".join(cn_bits), True))
-        ws.cell(row=r, column=10, value=_rt_lines(rl, en_size=8) if rl else "")
+        ws.cell(row=r, column=11, value=_rt_lines(rl, en_size=8) if rl else "")
 
         for cc in range(1, ncols + 1):
             cell = ws.cell(row=r, column=cc)
             cell.border = BORDER
             cell.font = Font(size=9)          # 样例正文 9pt、默认黑
-            if cc == 2:
+            if cc in (2, 3, 5, 11):
                 cell.alignment = Alignment(horizontal="left", vertical="center",
                                            wrap_text=True)
-            elif cc == 4:
-                cell.alignment = Alignment(horizontal="left", vertical="center",
-                                           wrap_text=True)
-            elif cc == 5:
+            elif cc == 6:
                 cell.alignment = CENTER
-            elif cc == 10:
-                cell.alignment = Alignment(horizontal="left", vertical="center",
-                                           wrap_text=True)
-            elif cc in (6, 9):
+            elif cc in (7, 10):
                 cell.alignment = Alignment(horizontal="right", vertical="center")
             else:
                 cell.alignment = CENTER
-        ws.cell(row=r, column=10).font = Font(size=8.5)
+        ws.cell(row=r, column=11).font = Font(size=8.5)
         if ln.price_override:
-            ws.cell(row=r, column=9).fill = FILL_INPUT
+            ws.cell(row=r, column=10).fill = FILL_INPUT
         # 行高按「描述块 + 备注块」的估算行数取大者（备注已拆成英/中两行）
         remark_txt = "\n".join([t for t, _ in rl]) if rl else ""
+        if getattr(ln,'pricing_model','')=='kitchen_split':
+            from export.descriptions import remark
+            en,cn=remark(ln,cfg)
+            remark_txt=en+'\n'+cn
         desc_txt = "\n".join([t for t, _ in dl]) if dl else ""
         rh = max(row_h, _est_height(remark_txt, 24, 13, 10),
                  _est_height(desc_txt, 34, 13, 10) if desc_txt else 0)
@@ -1034,16 +1044,16 @@ def _write_quote_sheet(ws, cfg, quote, lines, summary, discount, deposit_rate,
     def _sum_row(row: int, en: str, cn: str, value, *, money: bool = True,
                  bold: bool = False, big: bool = False, color: str = "",
                  fill=None, pct: bool = False) -> None:
-        ws.merge_cells("A%d:H%d" % (row, row))
+        ws.merge_cells("A%d:I%d" % (row, row))
         c = ws.cell(row=row, column=1, value=_bi(en, cn, en_size=10 if big else 9,
                                                  en_bold=bold, en_color=color))
         c.font = Font(bold=bold or big, size=10 if big else (9 if not bold else 10))
         c.alignment = Alignment(horizontal="right", vertical="center")
-        c2 = ws.cell(row=row, column=9, value=value)
+        c2 = ws.cell(row=row, column=10, value=value)
         c2.number_format = '0%' if pct else MONEY
         c2.font = Font(bold=True, size=11 if big else 9.5, color=color or None)
         c2.alignment = Alignment(horizontal="right", vertical="center")
-        ws.cell(row=row, column=10, value="")
+        ws.cell(row=row, column=11, value="")
         for cc in range(1, ncols + 1):
             cell = ws.cell(row=row, column=cc)
             if fill:
@@ -1151,7 +1161,7 @@ def _write_cost_sheet(ws, cfg, lines, price_rows) -> None:
     ws["A1"] = "成本与毛利核算（内部，勿随报价单外发） / COST & PROFIT (INTERNAL)"
     ws["A1"].font = Font(bold=True, size=14, color="C00000")
     ws.merge_cells("A1:L1")
-    ws["A2"] = ("供货价取自价格表 D 列；毛利率 = 毛利 ÷ 收入。增项与灯带按原系统口径不单独计成本。"
+    ws["A2"] = ("供货价取自价格表 D 列；毛利率 = 毛利 ÷ 收入。增项与灯带不单独计成本。"
                 "  Supply price from PriceList column D; margin = gross profit / revenue.")
     ws["A2"].font = Font(size=9, color=GREY)
     ws.merge_cells("A2:L2")
@@ -1243,17 +1253,13 @@ def export_workbook(path: str, cfg, quote: Dict[str, Any], lines: List[Any],
                     summary: Dict[str, Any], kind: str = "internal") -> str:
     """kind: internal（内部版）/ customer（客户版）。返回文件路径。
 
-    ★ 导出前按楼层**稳定排序**（B2 < B1 < GF < 1F < 2F … < 自定义），与旧样例
-      一致：同楼层内保持录入顺序。排序只影响导出，不改引擎结果与界面顺序。
+    Preserve the saved line order, including manual moves across floor groups.
     """
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
     mode = quote.get("mode") or cfg.price_mode
     discount = float(quote.get("discount") if quote.get("discount") not in (None, "") else 1.0)
     deposit = float(quote.get("deposit_rate", 0.5) or 0.0)
     _set_currency(cfg.currency)
-
-    lines = sorted(lines, key=lambda l: (floor_rank(getattr(l, "floor", "")),
-                                         int(getattr(l, "idx", 0) or 0)))
 
     wb = Workbook()
     ws_q = wb.active
@@ -1284,6 +1290,8 @@ def export_workbook(path: str, cfg, quote: Dict[str, Any], lines: List[Any],
         for col in ("D", "E", "F", "G"):
             ws_p.column_dimensions[col].hidden = True
 
+    from export.business import finalize as finalize_business
+    finalize_business(wb,cfg,quote,lines,summary,kind,price_rows,addon_rows,sum_rows)
     from export.standalone_layout import finalize_workbook
     finalize_workbook(wb, cfg, quote, kind, lines)
     wb.save(path)

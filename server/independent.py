@@ -3,12 +3,12 @@ from __future__ import annotations
 import base64, copy, io, json, math, os, re, sqlite3, threading, time
 from datetime import datetime
 from pathlib import Path
-from core.config import BASE_DIR, DATA_DIR, DB_PATH, PRICING_PATH, EXPORT_DIR
+from core.config import APP_ID, APP_VERSION, BASE_DIR, DATA_DIR, DB_PATH, PRICING_PATH, EXPORT_DIR
 from core.engine import PricingConfig
 from server import store
 
 GUARD = threading.RLock()
-TABLES = ('customers','projects','quotes','quote_items','materials','price_versions',
+TABLES = ('catalog_materials','catalog_rates','customers','projects','quotes','quote_items','materials','price_versions',
           'suppliers','custom_extras','custom_floors','settings','attachments')
 
 def atomic_json(path, data):
@@ -17,9 +17,16 @@ def atomic_json(path, data):
     with tmp.open('w',encoding='utf-8') as f:
         json.dump(data,f,ensure_ascii=False,indent=2,allow_nan=False)
         f.flush(); os.fsync(f.fileno())
-    os.replace(tmp,path)
+    for attempt in range(5):
+        try:
+            os.replace(tmp,path)
+            break
+        except PermissionError:
+            if attempt==4: raise
+            time.sleep(.05)
 
 def validate_config(raw):
+    from server.catalogue import is_legacy_kitchen
     if not isinstance(raw,dict): raise ValueError('Invalid configuration / 配置格式错误')
     for name in ('meta','prices','company','extras'):
         if not isinstance(raw.get(name),dict): raise ValueError('Missing section / 缺少配置分区: '+name)
@@ -28,6 +35,7 @@ def validate_config(raw):
     if not raw.get('rooms'):raise ValueError('At least one room / 至少保留一个区域')
     keys=set()
     for c in raw['categories']:
+        if is_legacy_kitchen(c):raise ValueError('Old kitchen pricing was removed; use carcass per metre plus projected doors / 旧版橱柜计价已移除，请使用柜体按米＋柜门投影')
         key=c.get('key','')
         if not re.fullmatch(r'[a-z][a-z0-9_]*',key) or key in keys:
             raise ValueError('Unique English category key required / 品类编码须为唯一英文编码')
@@ -48,6 +56,21 @@ def validate_config(raw):
         if isinstance(value,list):
             for x in value: check(x)
     check(raw)
+    from core.business import DEFAULT_COSTS, number
+    for k,v in raw.get("project_costs",{}).items():
+        if k in DEFAULT_COSTS: number(v,k)
+    if float(raw.get("project_costs",{}).get("after_sales_rate",.05))>1: raise ValueError("After-sales rate must be 0–1 / 售后比例须在0至1之间")
+    for e in raw.get("extras",{}).get("items",[]):
+        if e.get('auto_with_cabinet') and (e.get('basis')!='length' or e.get('unit') not in ('m','ft')):
+            raise ValueError('Automatic kitchen extras require length basis in metres / 橱柜自动增项须按米计长度')
+        if e.get("cost_price") is not None: number(e["cost_price"],"add-on cost")
+        unit=e.get("unit","pcs").replace("²","2")
+        allowed={"qty":("pcs","set","个","套","m","ft","m2","ft2"),"length":("m","ft"),"area":("m2","ft2")}
+        if unit not in allowed.get(e.get("basis","qty"),()): raise ValueError("Add-on unit does not match basis / 增项单位与计价依据不匹配")
+    for c in raw["categories"]:
+        for k in ("depth_tolerance_mm","height_tol_ft","nonstd_factor"):
+            if k in c: number(c[k],k)
+        if float(c.get("nonstd_factor",1.2))<=0: raise ValueError("Factor must be positive / 系数须大于零")
     if float(raw['meta'].get('mm_per_ft',304.8))<=0 or float(raw['meta'].get('nonstd_factor',1.2))<=0:
         raise ValueError('Conversion and factors must be positive / 换算率和系数须大于零')
     if float(raw.get('led',{}).get('price_per_m',0))<0:
@@ -69,7 +92,7 @@ def save_config(conn, raw):
         key=old['key']
         if any(c==key for c,_,_ in referenced):
             if not any(c['key']==key for c in raw.get('categories',[])):
-                raw.setdefault('categories',[]).append(dict(old,enabled=False))
+                raw.setdefault('categories',[]).append(dict(old,enabled=False,archived=True))
             table=raw.setdefault('prices',{}).setdefault(key,{})
             for c,mat,door in referenced:
                 if c!=key:continue
@@ -93,52 +116,15 @@ def save_config(conn, raw):
         store._pricing_cache['raw']=None
         store.seed_materials(conn)
 
-def reorder_catalogue(raw, collection, order, category=None, part=None):
-    def reorder_rows(rows, identity):
-        if not isinstance(order, list):
-            raise ValueError('Order must be a list / 顺序数据格式错误')
-        keys=[identity(row) for row in rows]
-        if len(keys)!=len(set(keys)) or len(order)!=len(keys) or len(order)!=len(set(order)) or set(order)!=set(keys):
-            raise ValueError('Order must include every option once / 排序需包含每个选项且不能重复')
-        by_key={identity(row):row for row in rows}
-        return [by_key[key] for key in order]
-
-    if collection=='categories':
-        rows=raw.get('categories',[])
-        active=[row for row in rows if row.get('enabled',True)]
-        archived=[row for row in rows if not row.get('enabled',True)]
-        raw['categories']=reorder_rows(active,lambda row:row.get('key'))+archived
-    elif collection=='rooms':
-        raw['rooms']=reorder_rows(raw.get('rooms',[]),lambda row:row.get('name'))
-    elif collection=='floors':
-        rows=raw.setdefault('floors',[])
-        raw['floors']=reorder_rows(rows,lambda row:row.get('code'))
-    elif collection=='extras':
-        raw.setdefault('extras',{})['items']=reorder_rows(raw.get('extras',{}).get('items',[]),lambda row:row.get('key'))
-    elif collection in ('materials','doors'):
-        table=raw.get('prices',{}).get(category)
-        if not isinstance(table,dict):
-            raise ValueError('Choose a valid category / 请选择有效品类')
-        wanted='door' if collection=='doors' else 'body'
-        keys=[key for key,value in table.items() if (value.get('part','body')=='door')==(wanted=='door')]
-        if not isinstance(order,list) or len(order)!=len(set(order)) or set(order)!=set(keys):
-            raise ValueError('Order must include every option once / 排序需包含每个选项且不能重复')
-        reordered={key:table[key] for key in order}
-        reordered.update((key,value) for key,value in table.items() if key not in reordered)
-        raw['prices'][category]=reordered
-    else:
-        raise ValueError('Unknown catalogue section / 未知排序分区')
-    return raw
-
 def export_config(conn,quote):
     snapshot=quote.get('snapshot') or {}
     if quote.get('locked') and snapshot.get('pricing'):
         overrides={(e['cat'],e['mat']):{k:v for k,v in e.items() if k in ('quote','cost')} for e in snapshot.get('overrides',[])}
         return PricingConfig(snapshot['pricing'],overrides=overrides)
-    return store.build_config(conn)
+    return store.config_for(conn,quote)
 
 def backup_payload(conn):
-    return {'format':'Whole-House-Customization-Backup','version':1,'at':store.now(),
+    return {'format':'VOUGUER-Backup','version':1,'at':store.now(),
             'pricing':store.pricing_raw(),
             'tables':{t:[dict(r) for r in conn.execute('SELECT * FROM '+t)] for t in TABLES},
             'logo':base64.b64encode((Path(DATA_DIR)/'company-logo.png').read_bytes()).decode() if (Path(DATA_DIR)/'company-logo.png').exists() else None}
@@ -154,11 +140,11 @@ def install(api):
 
     @route('GET','/api/identity')
     def independent_identity(conn,m,body,q):
-        return {'application':'whole-house-customization-independent-v3','version':'3.0.2','data_directory':DATA_DIR}
+        return {'application':APP_ID,'version':APP_VERSION,'data_directory':DATA_DIR}
 
     @route('GET','/api/config')
     def independent_config_get(conn,m,body,q):
-        return {'config':copy.deepcopy(store.pricing_raw())}
+        return {'config':copy.deepcopy(store.build_config(conn).raw)}
 
     @route('PUT','/api/config')
     def independent_config_put(conn,m,body,q):
@@ -181,18 +167,6 @@ def install(api):
         row=conn.execute('SELECT id FROM materials WHERE cat_key=? AND mat_key=?',(cat,key)).fetchone()
         return {'ok':True,'material':store.update_material(conn,row['id'],body)}
 
-    @route('POST','/api/catalogue/order')
-    def independent_catalogue_order(conn,m,body,q):
-        raw=copy.deepcopy(store.pricing_raw())
-        try:
-            if body.get('collection')=='floors' and 'floors' not in raw:
-                raw['floors']=store.list_floors(conn)
-            reorder_catalogue(raw,body.get('collection'),body.get('order'),body.get('category'),body.get('part'))
-            save_config(conn,raw)
-        except (ValueError,KeyError,TypeError) as e:
-            raise api.ApiError(str(e))
-        return {'ok':True,'bootstrap':api.bootstrap_payload(conn)}
-
     @route('DELETE',r'/api/materials/(\d+)')
     def independent_material_disable(conn,m,body,q):
         return {'ok':True,'material':store.update_material(conn,int(m.group(1)),{'enabled':False})}
@@ -214,18 +188,37 @@ def install(api):
 
     @route('GET','/api/backup')
     def independent_backup(conn,m,body,q):
-        name='whole-house-customization-backup-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'.json'
+        name='Quotation-backup-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'.json'
         path=Path(EXPORT_DIR)/name;atomic_json(path,backup_payload(conn))
         return {'__file__':str(path),'__name__':name}
 
     @route('POST','/api/restore')
     def independent_restore(conn,m,body,q):
-        if body.get('format')!='Whole-House-Customization-Backup' or body.get('version')!=1:raise api.ApiError('Invalid backup / 备份格式错误')
-        try:validate_config(body['pricing'])
+        if body.get('format')!='VOUGUER-Backup' or body.get('version')!=1:raise api.ApiError('Invalid backup / 备份格式错误')
+        logo=None
+        try:
+            validate_config(body['pricing'])
+            tables=body['tables']
+            for table in TABLES:
+                if not isinstance(tables.get(table),list) or not all(isinstance(row,dict) and row for row in tables[table]):
+                    raise ValueError('Missing or invalid backup table / 备份数据表缺失或格式错误: '+table)
+            if body.get('logo') is not None:
+                from PIL import Image
+                logo=base64.b64decode(body['logo'],validate=True)
+                if len(logo)>5_000_000:raise ValueError('Logo limit 5 MB / Logo限5MB')
+                with Image.open(io.BytesIO(logo)) as im:im.verify()
         except Exception as e:raise api.ApiError(str(e))
-        before=backup_payload(conn)
-        atomic_json(Path(DATA_DIR)/'restore-backups'/(datetime.now().strftime('%Y%m%d-%H%M%S-%f')+'.json'),before)
         with GUARD:
+            before=backup_payload(conn)
+            atomic_json(Path(DATA_DIR)/'restore-backups'/(datetime.now().strftime('%Y%m%d-%H%M%S-%f')+'.json'),before)
+            logo_path=Path(DATA_DIR)/'company-logo.png'
+            previous_logo=logo_path.read_bytes() if logo_path.exists() else None
+            def replace_logo(data):
+                if data is None:
+                    logo_path.unlink(missing_ok=True)
+                else:
+                    tmp=logo_path.with_suffix('.tmp')
+                    tmp.write_bytes(data);os.replace(tmp,logo_path)
             try:
                 conn.execute('BEGIN')
                 for table in reversed(TABLES): conn.execute('DELETE FROM '+table)
@@ -234,11 +227,16 @@ def install(api):
                     for row in body.get('tables',{}).get(table,[]):
                         row={k:v for k,v in row.items() if k in columns}
                         conn.execute('INSERT INTO '+table+'('+','.join('"'+k+'"' for k in row)+') VALUES ('+','.join('?' for _ in row)+')',list(row.values()))
+                from server.catalogue import retire_legacy_bundles, separate_kitchen_library, convert_kitchen_to_feet
+                retire_legacy_bundles(conn)
+                separate_kitchen_library(conn,body['pricing'])
+                convert_kitchen_to_feet(conn,body['pricing'])
                 atomic_json(PRICING_PATH,body['pricing'])
+                replace_logo(logo)
                 conn.commit();store._pricing_cache['raw']=None
-                if body.get('logo'):(Path(DATA_DIR)/'company-logo.png').write_bytes(base64.b64decode(body['logo']))
             except Exception:
                 conn.rollback();atomic_json(PRICING_PATH,before['pricing']);store._pricing_cache['raw']=None
+                replace_logo(previous_logo)
                 raise
         return {'ok':True}
 

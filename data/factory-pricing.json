@@ -2,7 +2,7 @@
   "meta": {
     "program": "全屋定制报价系统",
     "program_en": "Custom Whole-House Furniture Quotation System",
-    "version": "3.0.2",
+    "version": "1.2",
     "currency": "RM",
     "currency_symbol": "RM",
     "mm_per_ft": 304.8,
@@ -19,7 +19,7 @@
     },
     "nonstd_factor": 1.2,
     "height_tol_ft": 0.1,
-    "updated": "2026-10-21",
+    "updated": "2026-10-20",
     "source_note": ""
   },
   "groups": [
@@ -454,8 +454,7 @@
           "base_cabinet",
           "wall_cabinet"
         ],
-        "note_en": "",
-        "note": ""
+        "note_en": ""
       },
       {
         "key": "tall_basket",
@@ -467,8 +466,7 @@
           "base_cabinet",
           "wall_cabinet"
         ],
-        "note_en": "",
-        "note": ""
+        "note_en": ""
       },
       {
         "key": "dish_basket",
@@ -480,8 +478,7 @@
           "base_cabinet",
           "wall_cabinet"
         ],
-        "note_en": "",
-        "note": ""
+        "note_en": ""
       }
     ]
   },

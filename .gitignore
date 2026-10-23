@@ -1,6 +1,8 @@
 # Business data and generated output are never source code.
 /data/*
 !/data/factory-pricing.json
+/data/uploads/
+/workspace-data/
 /exports/
 /backups/
 /samples/
@@ -8,6 +10,7 @@
 /work/
 /.venv/
 /venv/
+*.exe
 __pycache__/
 *.py[cod]
 *.db

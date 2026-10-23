@@ -3,7 +3,7 @@
 
 版式与 Excel 报价单同口径：
     Logo + 公司信息 | DATE / REFERENCE NO. | ATTN / PROJECT | 标题（英主中辅）
-    10 列表格：NO. / PRODUCT / PICTURE / DESCRIPTION / DIMENSION /
+    11 列表格：NO. / AREA / PRODUCT / PICTURE / DESCRIPTION / DIMENSION /
               PROJECTED AREA / UNIT / QTY / PRICE (RM) / REMARK
     楼层分组标题带该楼层小计；末尾产品合计 / 折扣 / 折后总额 / 定金比例 /
     定金金额 / 余款；再往下是条款与备注。
@@ -150,7 +150,7 @@ def render(quote: Dict[str, Any], lines: List[Any], summary: Dict[str, Any],
     company = cfg.company()
     remark = cfg.remark()
     internal = kind == "internal"
-    ncol = 10
+    ncol = 11
 
     groups = _group_rows(lines)
     group_of = {}
@@ -180,17 +180,18 @@ def render(quote: Dict[str, Any], lines: List[Any], summary: Dict[str, Any],
         cab_en = (ln.cab_name_en or "").strip() or (ln.cat_name_en or "").strip()
         cab_cn = (ln.cab_name or "").strip() or (ln.cat_name or "").strip()
 
-        # 描述：英文整块在上（楼层·区域 / 材质），中文整块在下
-        floor_en = (ln.floor_en or "").strip() or floor_name_en(ln.floor)
-        room_en = (ln.room_en or "").strip()
-        if not room_en or room_en == (ln.room or "").strip():
-            room_en = room_en_of(ln.room)
+        # 区域单列；描述只保留材质和备注，不重复楼层、区域。
+        area_en = (ln.room_en or "").strip()
+        area_cn = (ln.room or "").strip()
+        if not area_en or area_en == area_cn:
+            area_en = room_en_of(area_cn)
+        area = _bi(area_en, area_cn)
         mat_en = (ln.material_label_en or "").strip()
         mat_cn = (ln.material_label or "").strip()
         if mat_en == mat_cn:
             mat_en = ""
-        en_lines = [x for x in (" · ".join([e for e in (floor_en, room_en) if e]), mat_en) if x]
-        cn_lines = [" · ".join([c for c in (ln.floor, ln.room) if c])]
+        en_lines = [mat_en] if mat_en else []
+        cn_lines = []
         if mat_cn:
             cn_lines.append(mat_cn)
         if ln.room_note_en:
@@ -211,6 +212,7 @@ def render(quote: Dict[str, Any], lines: List[Any], summary: Dict[str, Any],
         rows.append(
             "<tr>"
             "<td class='c'>%d</td>"
+            "<td class='area'>%s</td>"
             "<td class='prod'>%s</td>"
             "%s"
             "<td>%s</td>"
@@ -222,7 +224,7 @@ def render(quote: Dict[str, Any], lines: List[Any], summary: Dict[str, Any],
             "%s"
             "<td class='rmk'>%s</td>"
             "</tr>"
-            % (i + 1, _bi(cab_en.upper(), cab_cn, "div"),
+            % (i + 1, area, _bi(cab_en.upper(), cab_cn, "div"),
                "<td class='pic'>%s</td>" % pic,
                desc,
                _dim_text(ln),
@@ -232,12 +234,19 @@ def render(quote: Dict[str, Any], lines: List[Any], summary: Dict[str, Any],
         i += 1
 
     # ---- 表头 ----
-    heads = [("NO.", "序号", "4.5%"), ("PRODUCT", "产品名称", "12%"),
-                 ("PICTURE", "示意图", "15.5%"), ("DESCRIPTION", "描述", "19.5%"),
-                 ("DIMENSION (MM)", "尺寸 W*H*D", "8.5%"),
-                 ("PROJECTED AREA", "投影面积", "6.5%"), ("UNIT", "单位", "4.5%"),
-                 ("QTY", "数量", "4.5%"), ("PRICE (RM)", "单价", "8.5%"),
-                 ("REMARK", "备注", "16%")]
+    heads = [("NO.", "序号", "4%"),
+             ("AREA", "区域", "8.5%"),
+             ("PRODUCT", "产品名称", "12%"),
+             ("PICTURE", "示意图", "14%"),
+             ("DESCRIPTION", "描述", "18.5%"),
+             ("DIMENSION (MM)", "尺寸 W*H*D", "8%"),
+             ("PROJECTED AREA", "投影面积", "6%"),
+             ("UNIT", "单位", "4%"),
+             ("QTY", "数量", "4%"),
+             ("PRICE (RM)", "单价", "8%"),
+             ("REMARK", "备注", "13%")]
+    if any(getattr(ln,'pricing_model','')=='kitchen_split' for ln in lines):
+        heads[6]=('MEASURE','计费量','6%')
     cols = "".join('<col style="width:%s">' % w for _, _, w in heads)
     thead = "".join("<th>%s</th>" % _bi(en, cn) for en, cn, _ in heads)
 
@@ -257,11 +266,16 @@ def render(quote: Dict[str, Any], lines: List[Any], summary: Dict[str, Any],
     sum_rows.append(("DEPOSIT (RM)", "定金金额", _money(dep, ""), "", ""))
     sum_rows.append(("BALANCE (RM)", "余款", _money(bal, ""), "", ""))
     if internal:
-        sum_rows.append(("COST", "成本", _money(summary.get("supply_total", 0), ""), "", ""))
+        incomplete=summary.get('cost_complete') is False
+        sum_rows.append(("KNOWN COSTS" if incomplete else "COST", "已录成本（待补）" if incomplete else "成本", _money(summary.get("supply_total", 0), ""), "", ""))
         sum_rows.append(("GROSS PROFIT", "毛利",
-                         "%s（%.1f%%）" % (_money(summary.get("gross_profit", 0), ""),
+                         "Missing costs / 成本待补" if incomplete else "%s（%.1f%%）" % (_money(summary.get("gross_profit", 0), ""),
                                           float(summary.get("gross_margin", 0) or 0)),
                          "", ""))
+    if internal and "project_total_cost" in summary:
+        for en,cn,key in [("ACTUAL PROJECTION m²","实际总投影","actual_projection_m2"),("ESTIMATED VOLUME m³","估算运输体积","estimated_volume_m3"),("INSTALLATION RM","总安装费","installation_cost"),("TRANSPORT RM","总运输费","transport_cost"),("AFTER-SALES RESERVE RM","售后预留成本","after_sales_cost"),("PROJECT TOTAL COST RM","项目总成本","project_total_cost"),("ESTIMATED PROJECT PROFIT RM","项目预计利润","estimated_profit")]:
+            value=summary.get(key)
+            sum_rows.append((en,cn,("Missing costs / 成本待补" if value is None else "%.4f"%value if key in ("actual_projection_m2","estimated_volume_m3") else _money(value,"")),"",""))
     sum_html = "".join(
         "<tr%s><td class='lbl'>%s<span class='cn'>%s</span></td>"
         "<td class='val%s'>%s</td><td class='rate'>%s</td></tr>"
@@ -331,6 +345,8 @@ def render(quote: Dict[str, Any], lines: List[Any], summary: Dict[str, Any],
   tr { page-break-inside: avoid; break-inside: avoid; }
   .c { text-align: center; }
   .n { text-align: right; font-variant-numeric: tabular-nums; }
+  .area { font-size: 7.5px; line-height: 1.3; }
+  .area .cn { font-size: 6.2px; }
   .prod .en { font-size: 8.5px; letter-spacing: .2px; }
   .prod .cn { font-size: 7px; }
   .dim { font-variant-numeric: tabular-nums; letter-spacing: .2px; }

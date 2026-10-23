@@ -24,10 +24,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import export as exporter
 from core import Item, compute_quote
-from core.config import EXPORT_DIR, UPLOAD_DIR, WEB_DIR
+from core.config import APP_VERSION, DATA_DIR, DEFAULT_PORT, EXPORT_DIR, UPLOAD_DIR, WEB_DIR
 from core.floors import FLOOR_CODES, FLOOR_EN, normalize_floor
 from core.rooms import EXTRA_ROOMS
-from server import store
+from server import store, catalogue
 
 MIME = {
     ".html": "text/html; charset=utf-8",
@@ -50,9 +50,9 @@ class ApiError(Exception):
 
 # ------------------------------------------------------------------ 组装前端配置
 def _rooms_with_extra(cfg) -> List[Dict[str, str]]:
-    """pricing.json 的标准房间 + core.rooms.EXTRA_ROOMS（主卫 / 次卫 / 保姆房…）。
+    """报价配置中的标准房间 + core.rooms.EXTRA_ROOMS（主卫 / 次卫 / 保姆房…）。
 
-    只在**前端可选列表**里补齐，`data/pricing.json` 保持原样（md5 基准不变）。
+    只在**前端可选列表**里补齐，不改写报价配置。
     """
     rooms: List[Dict[str, str]] = [dict(r) for r in cfg.rooms()]
     have = {r.get("name", "") for r in rooms}
@@ -63,37 +63,81 @@ def _rooms_with_extra(cfg) -> List[Dict[str, str]]:
     return rooms
 
 
-def bootstrap_payload(conn) -> Dict[str, Any]:
-    cfg = store.build_config(conn)
+def bootstrap_payload(conn, cfg=None) -> Dict[str, Any]:
+    cfg = cfg or store.build_config(conn)
     raw = cfg.raw
+    settings = store.get_settings(conn)
+    # Shared with catalogue.payload(): one ordering policy, no drifting copies.
+    orders, order_seq = catalogue.ordering_state(conn)
+
+    def ordered(rows, ids, identity):
+        ranks = {str(value): index for index, value in enumerate(ids or [])}
+        return [row for _, row in sorted(enumerate(rows), key=lambda pair: (ranks.get(str(identity(pair[1])), len(ranks)), pair[0]))]
+
+    rate_rows = conn.execute("SELECT r.id,r.category_key,r.mat_key,r.material_id,m.part FROM catalog_rates r JOIN catalog_materials m ON m.id=r.material_id WHERE m.deleted=0").fetchall()
+    rate_by_id = {r['id']: r for r in rate_rows}
+    rate_by_option = {(r['category_key'], r['mat_key']): r for r in rate_rows}
+    material_ranks = {}
+    for part in ('body', 'kitchen_body', 'door'):
+        material_ranks[part] = {str(value): index for index, value in enumerate(orders.get('materials:' + part, []))}
+    rate_ranks = {}
+    for key, ids in orders.items():
+        if not key.startswith('rates:'): continue
+        by_key = {}
+        for index, rid in enumerate(ids):
+            rate = rate_by_id.get(rid)
+            if rate: by_key[rate['mat_key']] = index
+        rate_ranks[key.split(':', 1)[1]] = by_key
+
+    def order_options(options, category_key, part):
+        per_category = rate_ranks.get(category_key)
+        ranks = material_ranks.get(part, {})
+        # Latest *stamped* change wins, per part. Legacy rows have no stamps: both
+        # values are 0, and the original baseline behaviour must stay in force, i.e.
+        # the saved per-category rate order has priority.
+        if per_category and catalogue.library_wins(orders, order_seq, part, category_key):
+            per_category = None
+        if per_category:
+            return [option for _, option in sorted(enumerate(options), key=lambda pair: (per_category.get(pair[1]['key'], len(per_category)), pair[0]))]
+        def material_rank(pair):
+            rate = rate_by_option.get((category_key, pair[1]['key']))
+            return ranks.get(str(rate['material_id']) if rate else '', len(ranks)), pair[0]
+        return [option for _, option in sorted(enumerate(options), key=material_rank)]
+
     cats = []
-    for cat in cfg.cat_list():
-        if not cat.get("enabled",True): continue
+    categories = [cat for cat in cfg.cat_list() if cat.get("enabled", True) and not catalogue.is_legacy_kitchen(cat)]
+    categories = ordered(categories, orders.get('categories'), lambda category: category['key'])
+    for cat in categories:
         key = cat["key"]
+        view = cfg.for_category(key)
+        materials = [{"key": k, "label": v, "label_en": view.material_label_en(key, k),
+                      "price": view.unit_price(key, k), "default_price": view.default_unit_price(key, k),
+                      "supply": view.supply_price(key, k), "overridden": view.is_price_overridden(key, k),
+                      "unit": view.price_entry(key, k).get("unit", "")}
+                     for k, v in view.body_options(key) if view.price_entry(key, k).get("enabled", True)]
+        doors = [{"key": k, "label": v, "label_en": view.material_label_en(key, k),
+                  "price": view.unit_price(key, k), "default_price": view.default_unit_price(key, k),
+                  "supply": view.supply_price(key, k), "overridden": view.is_price_overridden(key, k),
+                  "unit": view.price_entry(key, k).get("unit", "")}
+                 for k, v in view.door_options(key) if view.price_entry(key, k).get("enabled", True)]
+        materials = order_options(materials, key, catalogue.body_part(cat))
+        doors = order_options(doors, key, 'door')
+        extras = ordered(view.extras_for(key), orders.get('extras'), lambda item: item.get('key'))
         cats.append({
             **cat,
-            "name_en": cfg.cat_name_en(key),
-            "group_name": cfg.group_name(key),
-            "group_name_en": cfg.group_name_en(key),
-            "materials": [{"key": k, "label": v, "label_en": cfg.material_label_en(key, k),
-                           "price": cfg.unit_price(key, k),
-                           "default_price": cfg.default_unit_price(key, k),
-                           "supply": cfg.supply_price(key, k),
-                           "overridden": cfg.is_price_overridden(key, k),
-                           "unit": cfg.price_entry(key, k).get("unit", "")}
-                          for k, v in cfg.body_options(key) if cfg.price_entry(key,k).get("enabled",True)],
-            "doors": [{"key": k, "label": v, "label_en": cfg.material_label_en(key, k),
-                       "price": cfg.unit_price(key, k),
-                       "default_price": cfg.default_unit_price(key, k),
-                       "supply": cfg.supply_price(key, k),
-                       "overridden": cfg.is_price_overridden(key, k),
-                       "unit": cfg.price_entry(key, k).get("unit", "")}
-                      for k, v in cfg.door_options(key) if cfg.price_entry(key,k).get("enabled",True)],
+            "door_min_height_ft": view.categories.get('custom_cabinet',{}).get('min_height_ft',0) if cat.get('pricing_model')=='kitchen_split' else cat.get('min_height_ft',0),
+            "name_en": view.cat_name_en(key),
+            "group_name": view.group_name(key),
+            "group_name_en": view.group_name_en(key),
+            "materials": materials,
+            "doors": doors,
             "extras": [{"key": e.get("key"), "name": e.get("name"),
                         "name_en": e.get("name_en", ""), "price": e.get("price", 0),
                         "unit": e.get("unit", "pcs"), "basis": e.get("basis", "qty"),
-                        "note": e.get("note", ""), "custom": bool(e.get("custom"))}
-                       for e in cfg.extras_for(key)],
+                        "note": e.get("note", ""), "custom": bool(e.get("custom")),
+                        "auto_with_cabinet": bool(e.get("auto_with_cabinet") and cat.get('pricing_model')=='kitchen_split'),
+                        "charge_kind": e.get("charge_kind", "addition")}
+                       for e in extras],
         })
     return {
         "meta": cfg.meta,
@@ -105,14 +149,14 @@ def bootstrap_payload(conn) -> Dict[str, Any]:
         "price_modes_en": raw.get("meta", {}).get("price_modes_en", {}),
         "categories": cats,
         "rooms": _rooms_with_extra(cfg),
-        "floors": raw.get("floors") if isinstance(raw.get("floors"), list) else store.list_floors(conn),
+        "floors": store.list_floors(conn),
         "floor_codes": FLOOR_CODES,
         "floor_en": FLOOR_EN,
         "led": cfg.led_meta(),
-        "extras_all": cfg.extras_items(),
+        "extras_all": ordered(cfg.extras_items(), orders.get('extras'), lambda item: item.get('key')),
         "company": cfg.company(),
         "remark": cfg.remark(),
-        "settings": store.get_settings(conn),
+        "settings": settings,
         "stats": store.stats(conn),
         "units": [{"key": "mm", "name": "mm"}, {"key": "cm", "name": "cm"},
                   {"key": "inch", "name": "inch"}, {"key": "ft", "name": "ft"}],
@@ -121,8 +165,25 @@ def bootstrap_payload(conn) -> Dict[str, Any]:
     }
 
 
+def _validate_legacy_kitchen_items(cfg, items, saved):
+    historical=[Item.from_dict(i).to_dict() for i in (saved or {}).get('items',[])
+                if catalogue.is_legacy_kitchen(cfg.category(i['cat']))]
+    for item in items or []:
+        if not catalogue.is_legacy_kitchen(cfg.category(item.get('cat'))):continue
+        value=Item.from_dict(item).to_dict()
+        if value not in historical:
+            raise ApiError('Old kitchen prices are history only; review current pricing before editing / 旧版橱柜仅保留历史记录，请先预览更新价格再编辑',409)
+        historical.remove(value)
+
+
 def _compute(conn, items: List[Dict], header: Dict) -> Dict[str, Any]:
-    cfg = store.build_config(conn)
+    from core.business import number
+    for item in items or []:
+        quantity=number(item.get('qty',1),'cabinet quantity')
+        if quantity<1 or quantity!=int(quantity):raise ValueError('Positive whole cabinet quantity required / 柜子数量须为正整数')
+    saved = store.get_quote(conn, int(header.get("id") or 0))
+    cfg = store.config_for(conn,saved) if saved else store.build_config(conn)
+    _validate_legacy_kitchen_items(cfg,items,saved)
     objs = [Item.from_dict(d) for d in (items or [])]
     lines, summary = compute_quote(
         cfg, objs, mode=header.get("mode"),
@@ -186,6 +247,7 @@ def api_quotes(conn, m, body, q):
 
 @route("POST", r"/api/quotes")
 def api_quote_create(conn, m, body, q):
+    if 'pricing_snapshot' in (body or {}):raise ApiError('New quotes use current library pricing / 新报价使用当前材料库价格，不接受旧计价快照',400)
     quote = store.create_quote(conn, body or {})
     return {"quote": quote, "computed": store.compute_for(conn, quote)}
 
@@ -207,11 +269,17 @@ def api_quote_save(conn, m, body, q):
     header = body.get("header") or {}
     if quote.get("locked"):
         raise ApiError("Unlock quotation before editing / 请先解锁报价再修改",409)
-    store.update_quote_header(conn, qid, header)
-    if "items" in body:
-        store.save_items(conn, qid, body.get("items") or [])
-    quote = store.get_quote(conn, qid)
-    return {"quote": quote, "computed": store.compute_for(conn, quote)}
+    if 'items' in body and body['items'] != quote['items']:
+        cfg=store.config_for(conn,quote)
+        _validate_legacy_kitchen_items(cfg,body.get('items'),quote)
+    # Header, lines and calculation must succeed as a single database transaction.
+    with conn:
+        store.update_quote_header(conn, qid, header, commit=False)
+        if "items" in body:
+            store.save_items(conn, qid, body.get("items") or [], commit=False)
+        quote = store.get_quote(conn, qid)
+        computed = store.compute_for(conn, quote)
+    return {"quote": quote, "computed": computed}
 
 
 @route("DELETE", r"/api/quotes/(\d+)")
@@ -346,11 +414,11 @@ def _export_quote(conn, qid: int, kind: str, fmt: str) -> Tuple[str, str]:
     data = store.compute_for(conn, quote)
     cfg = store.export_config(conn, quote)
     if data.get("locked"):
-        from core.engine import LineResult
+        from core.business import line_from_dict as LineResult
         lines = [LineResult(**l) for l in data["lines"]]
         summary = data["summary"]
     else:
-        from core.engine import LineResult
+        from core.business import line_from_dict as LineResult
         lines = [LineResult(**l) for l in data["lines"]]
         summary = data["summary"]
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -403,7 +471,7 @@ def api_health(conn, m, body, q):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "Whole-House-Customization/3.0"
+    server_version = "Whole-House-Quotation/" + APP_VERSION
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):   # 安静模式
@@ -468,6 +536,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._handle_static(path)
         except ApiError as exc:
             self._json({"error": exc.message}, exc.status)
+        except (ValueError, KeyError, TypeError) as exc:
+            self._json({"error": str(exc)}, 400)
         except BrokenPipeError:
             pass
         except Exception:
@@ -475,13 +545,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "Operation failed / 操作失败", "detail": traceback.format_exc(limit=3)}, 500)
 
     def _handle_api(self, method: str, path: str, query):
+        body = self._read_body()
         for m_method, pattern, fn_name in ROUTES:
             if m_method != method:
                 continue
             m = pattern.match(path)
             if not m:
                 continue
-            body = self._read_body()
             fn = globals()[fn_name]
             with contextlib.closing(store.connect()) as conn:
                 result = fn(conn, m, body, query)
@@ -504,7 +574,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             data = store.compute_for(conn, quote)
             cfg = store.export_config(conn, quote)
-        from core.engine import LineResult
+        from core.business import line_from_dict as LineResult
         lines = [LineResult(**l) for l in data["lines"]]
         kind = (query.get("kind", ["customer"])[0] or "customer").lower()
         html = exporter.render_print_html(quote, lines, data["summary"], cfg, kind=kind,
@@ -536,11 +606,13 @@ class Handler(BaseHTTPRequestHandler):
 import sys
 from server.independent import install
 install(sys.modules[__name__])
+from server.management import install as install_management
+install_management(sys.modules[__name__])
 
-PORT = 8878
+PORT = DEFAULT_PORT
 
 
-def serve(port: int = PORT, open_browser: bool = True) -> None:
+def serve(port: int = PORT, open_browser: bool = True, start_path: str = '') -> None:
     global PORT
     PORT = port
     store.init_db()
@@ -548,10 +620,10 @@ def serve(port: int = PORT, open_browser: bool = True) -> None:
     from core.config import DATA_DIR
     with open(os.path.join(DATA_DIR,"server.json"),"w") as f: json.dump({"port":port,"pid":os.getpid()},f)
     globals()["SERVER"] = httpd
-    url = "http://127.0.0.1:%d/" % port
+    url = "http://127.0.0.1:%d/" % port + start_path
     print("=" * 62)
-    print(" Whole-House Customization Quotation Studio v3 / 全屋定制报价独立版  ·  %s" % url)
-    print(" 关闭此窗口即退出。数据保存在 data/app.db")
+    print(" Quotation Studio %s / 全屋定制报价系统  ·  %s" % (APP_VERSION,url))
+    print(" 关闭此窗口即退出。数据与管理设置保存在: %s" % DATA_DIR)
     print("=" * 62)
     if open_browser:
         threading.Timer(0.6, lambda: _open_app_window(url)).start()
@@ -570,7 +642,7 @@ def _open_app_window(url: str) -> None:
         try:
             subprocess.Popen([browser, "--app=%s" % url, "--window-size=1440,960",
                               "--user-data-dir=%s" % os.path.join(
-                                  tempfile.gettempdir(), "whole_house_customization_independent_v3_profile")])
+                                  DATA_DIR, "browser-profile")])
             return
         except Exception:
             pass

@@ -4,7 +4,7 @@
 =================================
 职责
 ----
-* 建库建表、首次运行从 data/pricing.json 播种材料目录（默认价只读镜像）；
+* 建库建表、首次运行从公开空白出厂配置播种材料目录（默认价只读镜像）；
 * 材料价格「覆盖」独立存放，未改过的材料行为与原系统完全一致；
 * 报价单 / 明细 / 客户 / 项目 / 版本 / 自定义增项 / 自定义楼层 / 设置；
 * 报价锁价快照：已签发报价永远用快照，不被后续改价影响。
@@ -163,6 +163,9 @@ def build_config(conn: sqlite3.Connection) -> PricingConfig:
         e = raw.get("prices", {}).get(row["cat_key"], {}).get(row["mat_key"])
         if e is not None:
             e.update(label=row["name"], label_en=row["name_en"] or "", enabled=bool(row["enabled"]))
+    if raw.get("meta",{}).get("business_version") == 5:
+        from server.catalogue import apply
+        return PricingConfig(apply(conn,raw))
     return PricingConfig(raw, overrides=material_overrides(conn), extra_extras=custom_extras(conn))
 
 
@@ -205,6 +208,12 @@ def init_db() -> None:
             for col in cols:
                 if col not in have: conn.execute("ALTER TABLE %s ADD COLUMN %s TEXT DEFAULT ''" % (table,col))
         seed_materials(conn)
+        from server.catalogue import migrate, migrate_kitchen, retire_legacy_bundles, separate_kitchen_library, migrate_kitchen_feet
+        migrate(conn)
+        migrate_kitchen(conn)
+        retire_legacy_bundles(conn)
+        separate_kitchen_library(conn,pricing_raw())
+        migrate_kitchen_feet(conn)
         if fresh:
             raw = pricing_raw()
             for k, v in (("company_name", raw.get("company", {}).get("name", "")),
@@ -378,6 +387,10 @@ def _item_row_to_dict(r: sqlite3.Row) -> Dict[str, Any]:
 
 
 def _item_dict_to_row(quote_id: int, seq: int, d: Dict[str, Any]) -> tuple:
+    from core.business import number
+    quantity=number(d.get('qty',1),'cabinet quantity')
+    if quantity<1 or quantity!=int(quantity):
+        raise ValueError('Positive whole cabinet quantity required / 柜子数量须为正整数')
     def num(v):
         try:
             return float(v)
@@ -404,7 +417,13 @@ def _item_dict_to_row(quote_id: int, seq: int, d: Dict[str, Any]) -> tuple:
     )
 
 
-def save_items(conn: sqlite3.Connection, quote_id: int, items: List[Dict[str, Any]]) -> None:
+def save_items(conn: sqlite3.Connection, quote_id: int, items: List[Dict[str, Any]], *, commit: bool = True) -> None:
+    quote=get_quote(conn,quote_id)
+    if quote:
+        raw=config_for(conn,quote).raw
+        used={i.get('cat') for i in items}
+        if raw.get('meta',{}).get('business_version')==5 or any(c.get('source_key') and c['key'] in used for c in raw['categories']) or any((i.get('extras') or {}).get('glass_door') for i in items):
+            conn.execute('UPDATE quotes SET pricing_snapshot_json=? WHERE id=?',(json.dumps(raw,ensure_ascii=False),quote_id))
     conn.execute("DELETE FROM quote_items WHERE quote_id=?", (quote_id,))
     sql = ("INSERT INTO quote_items(quote_id, seq, floor, room, room_note, cat, cab_name,"
            " cab_name_en, material, door, length_mm, height_mm, depth_mm, qty, unit, nonstd,"
@@ -414,7 +433,8 @@ def save_items(conn: sqlite3.Connection, quote_id: int, items: List[Dict[str, An
     for i, d in enumerate(items):
         cur = conn.execute(sql, _item_dict_to_row(quote_id, i, d))
         conn.execute("UPDATE quote_items SET note_en=?,room_note_en=? WHERE id=?", (d.get("note_en",""),d.get("room_note_en",""),cur.lastrowid))
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def get_quote(conn: sqlite3.Connection, qid: int) -> Optional[Dict[str, Any]]:
@@ -425,6 +445,7 @@ def get_quote(conn: sqlite3.Connection, qid: int) -> Optional[Dict[str, Any]]:
     q["locked"] = bool(q["locked"])
     q["snapshot"] = json.loads(q["snapshot_json"]) if q["snapshot_json"] else None
     q.pop("snapshot_json", None)
+    q["pricing_snapshot"] = json.loads(q.pop("pricing_snapshot_json", None) or "null")
     q["items"] = [_item_row_to_dict(x) for x in conn.execute(
         "SELECT * FROM quote_items WHERE quote_id=? ORDER BY seq, id", (qid,))]
     return q
@@ -448,6 +469,10 @@ def list_quotes(conn: sqlite3.Connection, keyword: str = "", limit: int = 200) -
         r.pop("snapshot_json", None)
         if snap:
             r["total"] = snap.get("summary", {}).get("total", 0.0)
+            continue
+        if "pricing_snapshot_json" in r and r["pricing_snapshot_json"]:
+            quote=get_quote(conn,r["id"])
+            r["total"]=compute_for(conn,quote)["summary"]["total"]
             continue
         # 草稿没有快照：按当前价格即时算一个合计，历史列表才有金额可看
         if cfg is None:
@@ -477,30 +502,34 @@ def next_quote_no(conn: sqlite3.Connection) -> str:
 
 
 def create_quote(conn: sqlite3.Connection, payload: Dict[str, Any]) -> Dict[str, Any]:
-    no = payload.get("quote_no") or next_quote_no(conn)
-    cur = conn.execute(
-        "INSERT INTO quotes(quote_no, customer_id, project_id, customer, project, address,"
-        " quote_date, valid_days, mode, discount, deposit_rate, tax_rate, status, locked,"
-        " version, parent_id, note, terms, created_at, updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'draft',0,1,?,?,?,?,?)",
-        (no, payload.get("customer_id"), payload.get("project_id"),
-         payload.get("customer", ""), payload.get("project", ""), payload.get("address", ""),
-         payload.get("quote_date") or datetime.now().strftime("%Y-%m-%d"),
-         int(payload.get("valid_days") or 30), payload.get("mode") or "low",
-         float(payload.get("discount") if payload.get("discount") not in (None, "") else 1.0),
-         float(payload.get("deposit_rate") if payload.get("deposit_rate") not in (None, "") else 0.5),
-         float(payload.get("tax_rate") if payload.get("tax_rate") not in (None, "") else 0.0),
-         payload.get("parent_id"), payload.get("note", ""), payload.get("terms", ""),
-         now(), now()))
-    conn.commit()
-    items = payload.get("items") or []
-    if items:
-        save_items(conn, cur.lastrowid, items)
-    update_quote_header(conn, cur.lastrowid, {k:payload.get(k,"") for k in ("note_en","terms_en")})
-    return get_quote(conn, cur.lastrowid)
+    with conn:
+        no = payload.get("quote_no") or next_quote_no(conn)
+        cur = conn.execute(
+            "INSERT INTO quotes(quote_no, customer_id, project_id, customer, project, address,"
+            " quote_date, valid_days, mode, discount, deposit_rate, tax_rate, status, locked,"
+            " version, parent_id, note, terms, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'draft',0,?,?,?,?,?,?)",
+            (no, payload.get("customer_id"), payload.get("project_id"),
+             payload.get("customer", ""), payload.get("project", ""), payload.get("address", ""),
+             payload.get("quote_date") or datetime.now().strftime("%Y-%m-%d"),
+             int(payload.get("valid_days") or 30), payload.get("mode") or build_config(conn).price_mode,
+             float(payload.get("discount") if payload.get("discount") not in (None, "") else 1.0),
+             float(payload.get("deposit_rate") if payload.get("deposit_rate") not in (None, "") else 0.5),
+             float(payload.get("tax_rate") if payload.get("tax_rate") not in (None, "") else 0.0),
+             int(payload.get("version") or 1), payload.get("parent_id"), payload.get("note", ""), payload.get("terms", ""),
+             now(), now()))
+        pricing = payload.get("pricing_snapshot") or build_config(conn).raw
+        conn.execute("UPDATE quotes SET pricing_snapshot_json=? WHERE id=?", (json.dumps(pricing,ensure_ascii=False),cur.lastrowid))
+        items = payload.get("items") or []
+        if items:
+            save_items(conn, cur.lastrowid, items, commit=False)
+        update_quote_header(conn, cur.lastrowid, {k:payload.get(k,"") for k in ("note_en","terms_en")}, commit=False)
+        quote = get_quote(conn, cur.lastrowid)
+        compute_for(conn, quote)
+        return quote
 
 
-def update_quote_header(conn: sqlite3.Connection, qid: int, payload: Dict[str, Any]) -> None:
+def update_quote_header(conn: sqlite3.Connection, qid: int, payload: Dict[str, Any], *, commit: bool = True) -> None:
     allowed = ("quote_no", "customer_id", "project_id", "customer", "project", "address",
                "quote_date", "valid_days", "mode", "discount", "deposit_rate", "tax_rate",
                "status", "note", "terms", "note_en", "terms_en")
@@ -518,8 +547,33 @@ def update_quote_header(conn: sqlite3.Connection, qid: int, payload: Dict[str, A
     fields["updated_at"] = now()
     sets = ", ".join("%s=?" % k for k in fields)
     conn.execute("UPDATE quotes SET %s WHERE id=?" % sets, list(fields.values()) + [qid])
-    conn.commit()
+    if commit:
+        conn.commit()
 
+
+def config_for(conn,quote):
+    snapshot=quote.get('snapshot') or {}
+    if quote.get('locked') and snapshot.get('pricing'):
+        overrides={(e['cat'],e['mat']):{k:v for k,v in e.items() if k in ('quote','cost')} for e in snapshot.get('overrides',[])}
+        return PricingConfig(snapshot['pricing'],overrides=overrides)
+    raw = quote.get("pricing_snapshot")
+    if raw:
+        from . import catalogue
+        current=build_config(conn).raw
+        if raw.get('meta',{}).get('business_version')==5:
+            import copy
+            raw=copy.deepcopy(raw)
+            known={c['key'] for c in raw['categories']}
+            raw['categories'].extend(copy.deepcopy(c) for c in current['categories'] if c['key'] not in known)
+            for cat,entries in current['prices'].items():
+                table=raw['prices'].setdefault(cat,{})
+                for key,e in entries.items():
+                    if key not in table:table[key]=copy.deepcopy(e)
+            known={e['key'] for e in raw['extras']['items']}
+            raw['extras']['items'].extend(copy.deepcopy(e) for e in current['extras']['items'] if e['key'] not in known)
+        raw=catalogue.extend_historical_kitchen(raw,current)
+        return PricingConfig(catalogue.include_glass_option(raw,current,quote.get('items',[])))
+    return build_config(conn)
 
 def compute_for(conn: sqlite3.Connection, quote: Dict[str, Any]) -> Dict[str, Any]:
     """返回 {lines, summary}；已锁价报价直接返回快照，不重算。"""
@@ -527,7 +581,7 @@ def compute_for(conn: sqlite3.Connection, quote: Dict[str, Any]) -> Dict[str, An
         snap = quote["snapshot"]
         return {"lines": snap.get("lines", []), "summary": snap.get("summary", {}),
                 "locked": True, "snapshot_at": snap.get("at")}
-    cfg = build_config(conn)
+    cfg = config_for(conn,quote)
     items = [Item.from_dict(d) for d in quote.get("items", [])]
     lines, summary = compute_quote(
         cfg, items, mode=quote.get("mode"),
@@ -545,7 +599,7 @@ def lock_quote(conn: sqlite3.Connection, qid: int) -> Dict[str, Any]:
     snap = {"at": now(), "lines": data["lines"], "summary": data["summary"],
             "mode": quote.get("mode"), "discount": quote.get("discount"),
             "deposit_rate": quote.get("deposit_rate"), "tax_rate": quote.get("tax_rate"),
-            "pricing": build_config(conn).raw, "overrides": [{"cat":c,"mat":m,**v} for (c,m),v in material_overrides(conn).items()]}
+            "pricing": config_for(conn,quote).raw, "overrides": []}
     conn.execute("UPDATE quotes SET locked=1, status='issued', snapshot_json=?, updated_at=?"
                  " WHERE id=?", (json.dumps(snap, ensure_ascii=False), now(), qid))
     conn.commit()
@@ -563,6 +617,15 @@ def duplicate_quote(conn: sqlite3.Connection, qid: int) -> Dict[str, Any]:
     if not quote:
         raise KeyError("报价不存在")
     payload = dict(quote)
+    import copy
+    cfg=config_for(conn,quote)
+    raw=copy.deepcopy(cfg.raw)
+    for (cat,mat),values in cfg.overrides.items():
+        e=raw.get('prices',{}).get(cat,{}).get(mat)
+        if e:
+            if 'quote' in values:e['market']=[values['quote']]*2
+            if 'cost' in values:e['supply']=values['cost']
+    payload['pricing_snapshot']=raw
     payload["quote_no"] = next_quote_no(conn)
     payload["parent_id"] = qid
     payload["version"] = int(quote.get("version") or 1) + 1

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """区域（房间）中英文对照。
 
-`data/pricing.json` 只列了 13 个标准房间（主卧 / 次卧 / 客厅 …），实际报价里
+公开出厂配置只列了标准房间（主卧 / 次卧 / 客厅 …），实际报价里
 还会出现「主卫 / 次卫 / 公卫 / 保姆房 / 储物间」这类常见区域。原系统对未知
 区域直接回退成中文，于是导出时「英文行」里混进了中文（`First Floor · 主卫`）。
 
@@ -16,9 +16,9 @@ from __future__ import annotations
 import re
 from typing import Dict, List
 
-# 标准 13 个（与 data/pricing.json 保持一致，作为兜底） + 常见扩展
+# 标准房间（与出厂配置保持一致，作为兜底） + 常见扩展
 ROOM_EN: Dict[str, str] = {
-    # —— 与 pricing.json 一致 ——
+    # —— 与公开出厂配置一致 ——
     "主卧": "Master Bedroom",
     "次卧": "Second Bedroom",
     "儿童房": "Children's Room",
@@ -71,7 +71,7 @@ ROOM_EN: Dict[str, str] = {
     "餐厅+厨房": "Dining / Kitchen",
 }
 
-# 前端「区域」下拉需要补的项（pricing.json 里没有的）
+# 前端「区域」下拉需要补的项（公开出厂配置里没有的）
 EXTRA_ROOMS: List[Dict[str, str]] = [
     {"name": "主卫", "name_en": "Master Bathroom"},
     {"name": "次卫", "name_en": "Second Bathroom"},
@@ -92,7 +92,7 @@ _TAILS = ("区域", "空间", "区", "间", "室", "房")
 def room_en(name: str, known: Dict[str, str] | None = None) -> str:
     """返回区域英文名；没有对应英文时返回空串。
 
-    known: 传入 `{name: name_en}`（来自 pricing.json）时优先使用，便于用户自定义。
+    known: 传入 `{name: name_en}`（来自报价配置）时优先使用，便于用户自定义。
     """
     raw = str(name or "").strip()
     if not raw:
@@ -101,12 +101,12 @@ def room_en(name: str, known: Dict[str, str] | None = None) -> str:
         for k, v in known.items():
             if k == raw:
                 return (v or "").strip()
-        for k, v in sorted(known.items(), key=lambda pair: len(pair[0]), reverse=True):
-            if raw.startswith(k):
-                suffix = raw[len(k):]
-                match = re.fullmatch(r"\s*(?:#|№)?\s*(\d+)", suffix)
-                if match and v:
-                    return f"{v.strip()} {match.group(1)}"
+    numbered = re.fullmatch(r"(.+?)\s*#?\s*(\d+)", raw)
+    if numbered:
+        base, number = numbered.group(1).strip(), numbered.group(2)
+        hit = (known or {}).get(base) or ROOM_EN.get(base)
+        if hit:
+            return "%s %s" % (hit, number)
     hit = ROOM_EN.get(raw)
     if hit:
         return hit

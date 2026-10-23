@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
+from typing import Dict
 
 # —— 房间 / 位置词 ——
 ROOM_WORDS: Dict[str, str] = {
@@ -54,9 +54,16 @@ CABINET_WORDS: Dict[str, str] = {
     "床头柜": "Bedside Table",
     "梳妆台": "Dressing Table",
     "书桌": "Desk",
+    "书台": "Study Desk",
+    "妆台": "Dressing Table",
+    "妆柜": "Vanity Cabinet",
+    "矮柜": "Low Cabinet",
+    "岛台": "Kitchen Island",
+    "阳台柜": "Balcony Cabinet",
     "榻榻米": "Tatami",
     "冰箱": "Fridge",
     # —— 常见但原词典没有的 ——
+    "神台柜": "Altar Cabinet",
     "神台": "Altar Cabinet",
     "神龛": "Altar Cabinet",
     "佛龛": "Altar Cabinet",
@@ -76,68 +83,79 @@ CABINET_WORDS: Dict[str, str] = {
 
 DICT: Dict[str, str] = {**ROOM_WORDS, **CABINET_WORDS}
 
-# 长词优先：3 字词排在 2 字词前面，保证「储物柜」不被拆开
-_KEYS: List[str] = sorted(DICT, key=len, reverse=True)
-
 _CJK = re.compile(r"[\u4e00-\u9fff]")
 _SEP = re.compile(r"[\s\-_/、,，.。·]+")
-_TRAILING_CODE = re.compile(r"\s*([0-9]+|[A-Za-z])\s*$")
+_TRAILING_CODE = re.compile(r"(?:\s+([A-Za-z])|([0-9]+))\s*$")
 
 
-def _segment(core: str) -> Optional[List[str]]:
-    """最长词优先切分；有任何一个字切不出来就返回 None（不猜）。"""
-    out: List[str] = []
-    i = 0
-    n = len(core)
-    while i < n:
-        for k in _KEYS:
-            if core.startswith(k, i):
-                out.append(k)
-                i += len(k)
-                break
-        else:
-            return None
+def _dictionary(glossary=None):
+    out = dict(DICT)
+    if isinstance(glossary, dict):
+        out.update({str(k).strip(): str(v).strip() for k, v in glossary.items()
+                    if str(k).strip() and str(v).strip()})
     return out
 
 
-def translate_cabinet_name(name: str) -> str:
-    """中文柜体名 → 英文；无法可靠翻译时返回 ""（不是瞎猜）。"""
+def _translate(raw, mapping):
+    normalized = {_SEP.sub("", key).lower(): value for key, value in mapping.items()}
+    keys = sorted(normalized, key=len, reverse=True)
+    core = _SEP.sub("", raw).lower()
+    if not core:
+        return ""
+    parts = []
+    i = 0
+    while i < len(core):
+        match = next((key for key in keys if core.startswith(key, i)), None)
+        if not match:
+            return ""
+        parts.extend(normalized[match].split())
+        i += len(match)
+    words = []
+    for word in parts:
+        if not words or words[-1].lower() != word.lower():
+            words.append(word)
+    return " ".join(words)
+
+
+def translate_cabinet_name(name: str, glossary=None) -> str:
+    """Translate a cabinet name in either direction; unknown text is not guessed."""
     raw = (name or "").strip()
     if not raw:
         return ""
-    # 已经是英文（没有汉字）：原样返回，避免「Shoe Cabinet / Shoe Cabinet」
-    if not _CJK.search(raw):
-        return raw
-
     suffix = ""
     m = _TRAILING_CODE.search(raw)
     core = raw
     if m:
-        suffix = m.group(1)
+        suffix = m.group(1) or m.group(2)
         core = raw[:m.start()].strip()
-    core = _SEP.sub("", core)          # 「主卧 衣柜」「主卧-衣柜」都能认
-    if not core:
-        return ""
-    parts = _segment(core)
-    if parts is None:
-        return ""
-    words: List[str] = []
-    for p in parts:
-        for w in DICT[p].split():
-            # 「厨房橱柜」→ Kitchen + Kitchen Cabinet，去掉重复的 Kitchen
-            if words and words[-1].lower() == w.lower():
-                continue
-            words.append(w)
-    en = " ".join(words)
-    return ("%s %s" % (en, suffix)).strip() if suffix else en
+    mapping = _dictionary(glossary)
+    if _CJK.search(core):
+        translated = _translate(core, mapping)
+    else:
+        reverse = {}
+        for zh, en in mapping.items():
+            reverse[en.lower()] = zh
+        translated = _translate(core, reverse)
+    return ("%s %s" % (translated, suffix)).strip() if translated and suffix else translated
 
 
-def resolve_cabinet_name_en(cab_name: str, override: str = "") -> str:
-    """最终英文名：手动覆盖优先，否则自动翻译。"""
+def resolve_cabinet_name_en(cab_name: str, override: str = "", glossary=None) -> str:
+    """Final English name, retaining saved legacy English overrides."""
     ov = (override or "").strip()
     if ov:
         return ov
-    return translate_cabinet_name(cab_name)
+    if not _CJK.search((cab_name or "").strip()):
+        return (cab_name or "").strip()
+    return translate_cabinet_name(cab_name, glossary)
+
+
+def resolve_bilingual_cabinet_name(name: str, override: str = "", glossary=None):
+    raw = (name or "").strip()
+    if _CJK.search(raw):
+        return resolve_cabinet_name_en(raw, override, glossary), raw
+    en = (override or raw).strip()
+    zh = translate_cabinet_name(raw, glossary)
+    return en or raw, zh or raw
 
 
 def bilingual_cab_name(cab_name: str, override: str = "") -> str:
@@ -151,14 +169,11 @@ def bilingual_cab_name(cab_name: str, override: str = "") -> str:
     return "%s / %s" % (zh, en)
 
 
-def is_translatable(name: str) -> bool:
+def is_translatable(name: str, glossary=None) -> bool:
     """词典能否完整覆盖；界面用它决定提示「自动」还是「请手动填英文」。"""
     raw = (name or "").strip()
     if not raw:
         return False
     if not _CJK.search(raw):
         return True
-    m = _TRAILING_CODE.search(raw)
-    core = raw[:m.start()].strip() if m else raw
-    core = _SEP.sub("", core)
-    return bool(core) and _segment(core) is not None
+    return bool(translate_cabinet_name(raw, glossary))

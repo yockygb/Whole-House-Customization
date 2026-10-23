@@ -33,8 +33,15 @@ def _names(entry, catalogue):
     return str(en),str(cn)
 
 def remark(ln, cfg):
-    """Return (complete English block, complete Chinese block), without changing amounts."""
+    """Return bilingual result-only remarks, without exposing price arithmetic."""
     en=[];cn=[]
+    if getattr(ln,'pricing_model','')=='kitchen_split':
+        unit_en,unit_cn=_unit(ln.unit)
+        en.append('Carcass %s %s' % (_number(ln.measure),unit_en))
+        cn.append('柜体%s%s' % (_number(ln.measure),unit_cn))
+        if getattr(ln,'door_key',''):
+            en.append('Door %s ft²' % _number(ln.door_measure))
+            cn.append('柜门%s平方英尺' % _number(ln.door_measure))
     led=cfg.led_meta()
     selected_led=(getattr(ln, 'led_type', 'none') not in ('none', '', None)
                   and (float(getattr(ln, 'led_qty', 0) or 0)>0
@@ -56,9 +63,27 @@ def remark(ln, cfg):
     for entry in getattr(ln, 'extras_list', []) or []:
         en_name,cn_name=_names(entry,catalogue)
         basis=entry.get('basis','qty')
-        if basis=='length':
+        if cfg.meta.get('business_version')==5 or getattr(ln,'pricing_model','')=='kitchen_split':
+            quantity=_number(entry.get('measure',entry.get('qty',1)))
+            unit=entry.get('unit','pcs')
+            if basis=='length' and entry.get('l_mm'):
+                length=_number(entry['l_mm'])
+                en_name+=f' {length} mm';cn_name+=f' {length} 毫米'
+            elif basis=='area' and entry.get('w_mm') and entry.get('h_mm'):
+                width,height=_number(entry['w_mm']),_number(entry['h_mm'])
+                en_name+=f' {width} × {height} mm';cn_name+=f' {width} × {height} 毫米'
+            en_name+=f' {quantity} {unit}'
+            cn_name+=f' {quantity} {unit}'
+        elif basis=='length':
             measure=f"{float(entry.get('measure',0) or 0):.2f}"
-            en_name+=f' {measure} ft';cn_name+=f' {measure} 英尺'
+            length=float(entry.get('l_mm') or 0)
+            if length>0:
+                quantity=entry.get('qty',1)
+                count=f' × {_number(quantity)}' if quantity!=1 else ''
+                en_name+=f' {_number(length)} mm{count} ({measure} ft)'
+                cn_name+=f' {_number(length)} 毫米{count}（{measure} 英尺）'
+            else:
+                en_name+=f' {measure} ft';cn_name+=f' {measure} 英尺'
         elif basis=='area':
             w=float(entry.get('w_mm') or 0);h=float(entry.get('h_mm') or 0)
             if w>0 and h>0:

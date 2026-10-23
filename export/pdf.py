@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from typing import Optional
 
 _CANDIDATES = [
@@ -45,11 +46,22 @@ def html_to_pdf(url: str, out_path: str, timeout: int = 90) -> bool:
            "--user-data-dir=%s" % profile,
            "--no-pdf-header-footer", "--print-to-pdf-no-header",
            "--print-to-pdf=%s" % out_path, url]
+    deadline=time.monotonic()+timeout
     try:
         subprocess.run(cmd, timeout=timeout, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, check=False)
+        # Edge's launcher can exit before its child has finished writing the PDF.
+        while time.monotonic()<deadline:
+            if os.path.exists(out_path) and os.path.getsize(out_path)>800:
+                with open(out_path,'rb') as f:
+                    f.seek(-64,os.SEEK_END)
+                    if b'%%EOF' in f.read():return True
+            time.sleep(.1)
     except Exception:
         return False
     finally:
-        shutil.rmtree(profile, ignore_errors=True)
-    return os.path.exists(out_path) and os.path.getsize(out_path) > 800
+        for _ in range(50):
+            shutil.rmtree(profile, ignore_errors=True)
+            if not os.path.exists(profile):break
+            time.sleep(.1)
+    return False

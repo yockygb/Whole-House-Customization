@@ -1,52 +1,47 @@
-"""Persistent option ordering used by the quotation manager."""
-import copy
-import json
-from pathlib import Path
+"""Quick-entry ordering follows the saved Management catalogue order."""
 import unittest
+from server.catalogue import effective_rate_order, _slot_order
 
-from server.independent import reorder_catalogue
+
+def sample_data():
+    return {
+        'categories': [{'key': 'sample', 'measure': 'area', 'pricing_model': 'projection_split'}],
+        'materials': [
+            {'id': 'body-a', 'part': 'body'}, {'id': 'body-b', 'part': 'body'},
+            {'id': 'door-a', 'part': 'door'},
+        ],
+        'rates': [
+            {'id': 'rate-a', 'category_key': 'sample', 'material_id': 'body-a'},
+            {'id': 'rate-b', 'category_key': 'sample', 'material_id': 'body-b'},
+            {'id': 'rate-door', 'category_key': 'sample', 'material_id': 'door-a'},
+        ],
+    }
 
 
 class CatalogueOrderTests(unittest.TestCase):
-    def setUp(self):
-        path = Path(__file__).resolve().parents[1] / 'data' / 'factory-pricing.json'
-        self.raw = json.loads(path.read_text(encoding='utf-8'))
+    def test_library_order_is_used_when_no_category_order_exists(self):
+        data = sample_data()
+        orders = {'materials:body': ['body-b', 'body-a'], 'materials:door': ['door-a']}
+        self.assertEqual(effective_rate_order(data, orders, {}, 'sample'),
+                         ['rate-b', 'rate-a', 'rate-door'])
 
-    def test_categories_and_rooms_follow_saved_order(self):
-        for collection, rows, field in (
-                ('categories', self.raw['categories'], 'key'),
-                ('rooms', self.raw['rooms'], 'name')):
-            order = [row[field] for row in reversed(rows)]
-            result = reorder_catalogue(copy.deepcopy(self.raw), collection, order)
-            self.assertEqual([row[field] for row in result[collection]], order)
+    def test_category_order_preserves_cross_part_slots(self):
+        data = sample_data()
+        orders = {'rates:sample': ['rate-door', 'rate-a', 'rate-b']}
+        self.assertEqual(effective_rate_order(data, orders, {}, 'sample'),
+                         ['rate-door', 'rate-a', 'rate-b'])
 
-    def test_material_order_only_reorders_the_selected_part(self):
-        table = self.raw['prices']['custom_cabinet']
-        body = [key for key, value in table.items() if value.get('part', 'body') != 'door']
-        if len(body) < 2:
-            self.skipTest('Public seed has fewer than two body materials')
-        order = list(reversed(body))
-        result = reorder_catalogue(copy.deepcopy(self.raw), 'materials', order,
-                                   category='custom_cabinet')
-        ordered_body = [key for key, value in result['prices']['custom_cabinet'].items()
-                        if value.get('part', 'body') != 'door']
-        self.assertEqual(ordered_body, order)
+    def test_newer_library_order_reorders_within_category_slots(self):
+        data = sample_data()
+        orders = {'rates:sample': ['rate-door', 'rate-a', 'rate-b'],
+                  'materials:body': ['body-b', 'body-a']}
+        seqs = {'rates:sample': 1, 'materials:body': 2}
+        self.assertEqual(effective_rate_order(data, orders, seqs, 'sample'),
+                         ['rate-door', 'rate-b', 'rate-a'])
 
-    def test_order_must_contain_each_option_once(self):
-        with self.assertRaises(ValueError):
-            reorder_catalogue(copy.deepcopy(self.raw), 'categories', ['custom_cabinet'])
-        with self.assertRaises(ValueError):
-            reorder_catalogue(copy.deepcopy(self.raw), 'categories',
-                              ['custom_cabinet', 'custom_cabinet'])
-
-    def test_archived_categories_stay_outside_active_order(self):
-        raw = copy.deepcopy(self.raw)
-        archived = dict(raw['categories'][0], enabled=False)
-        raw['categories'].append(archived)
-        active_order = [row['key'] for row in reversed(raw['categories'][:-1])]
-        result = reorder_catalogue(raw, 'categories', active_order)
-        self.assertEqual([row['key'] for row in result['categories'][:-1]], active_order)
-        self.assertEqual(result['categories'][-1], archived)
+    def test_stale_order_ids_are_ignored(self):
+        self.assertEqual(_slot_order(['old', 'rate-b'], ['rate-a', 'rate-b']),
+                         ['rate-b', 'rate-a'])
 
 
 if __name__ == '__main__':

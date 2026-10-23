@@ -1,0 +1,185 @@
+{
+  "source": "reference-white-models.png",
+  "types": [
+    {
+      "type": "balcony",
+      "file": "balcony.png",
+      "label": "Balcony cabinet / 阳台柜",
+      "source_box": [
+        10,
+        10,
+        378,
+        283
+      ],
+      "size": [
+        368,
+        273
+      ]
+    },
+    {
+      "type": "tv",
+      "file": "tv.png",
+      "label": "TV cabinet / 电视柜",
+      "source_box": [
+        392,
+        10,
+        761,
+        283
+      ],
+      "size": [
+        369,
+        268
+      ]
+    },
+    {
+      "type": "altar",
+      "file": "altar.png",
+      "label": "Altar cabinet / 神台柜",
+      "source_box": [
+        776,
+        10,
+        1143,
+        283
+      ],
+      "size": [
+        367,
+        273
+      ]
+    },
+    {
+      "type": "shoe",
+      "file": "shoe.png",
+      "label": "Shoe cabinet / 鞋柜",
+      "source_box": [
+        1158,
+        10,
+        1526,
+        283
+      ],
+      "size": [
+        368,
+        273
+      ]
+    },
+    {
+      "type": "dressing_table",
+      "file": "dressing_table.png",
+      "label": "Dressing table / 妆台",
+      "source_box": [
+        10,
+        350,
+        378,
+        622
+      ],
+      "size": [
+        368,
+        272
+      ]
+    },
+    {
+      "type": "book_desk",
+      "file": "book_desk.png",
+      "label": "Study desk / 书台",
+      "source_box": [
+        392,
+        350,
+        761,
+        622
+      ],
+      "size": [
+        369,
+        270
+      ]
+    },
+    {
+      "type": "bookcase",
+      "file": "bookcase.png",
+      "label": "Bookcase / 书柜",
+      "source_box": [
+        776,
+        350,
+        1143,
+        622
+      ],
+      "size": [
+        367,
+        272
+      ]
+    },
+    {
+      "type": "wine",
+      "file": "wine.png",
+      "label": "Wine cabinet / 酒柜",
+      "source_box": [
+        1158,
+        350,
+        1526,
+        622
+      ],
+      "size": [
+        368,
+        272
+      ]
+    },
+    {
+      "type": "kitchen",
+      "file": "kitchen.png",
+      "label": "Kitchen cabinet / 橱柜",
+      "source_box": [
+        10,
+        690,
+        378,
+        957
+      ],
+      "size": [
+        368,
+        267
+      ]
+    },
+    {
+      "type": "island",
+      "file": "island.png",
+      "label": "Kitchen island / 岛台",
+      "source_box": [
+        392,
+        690,
+        761,
+        957
+      ],
+      "size": [
+        369,
+        267
+      ]
+    },
+    {
+      "type": "low_cabinet",
+      "file": "low_cabinet.png",
+      "label": "Low cabinet / 矮柜",
+      "source_box": [
+        776,
+        690,
+        1143,
+        957
+      ],
+      "size": [
+        362,
+        177
+      ]
+    },
+    {
+      "type": "wardrobe",
+      "file": "wardrobe.png",
+      "label": "Wardrobe / 衣柜",
+      "source_box": [
+        1158,
+        690,
+        1526,
+        957
+      ],
+      "size": [
+        357,
+        267
+      ]
+    }
+  ]
+}

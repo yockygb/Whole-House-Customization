@@ -36,7 +36,7 @@ $result=Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
 [Console]::OutputEncoding=[System.Text.Encoding]::UTF8
 $result.Text
 '''
-    with tempfile.TemporaryDirectory(prefix='whole_house_customization_ocr_') as temp:
+    with tempfile.TemporaryDirectory(prefix='vouguer_ocr_') as temp:
         script=Path(temp)/'ocr.ps1';script.write_text(ps,encoding='utf-8-sig')
         exe=os.path.join(os.environ.get('SystemRoot',r'C:\Windows'),'System32','WindowsPowerShell','v1.0','powershell.exe')
         result=subprocess.run([exe,'-NoProfile','-ExecutionPolicy','Bypass','-File',str(script),str(path)],capture_output=True,timeout=70,creationflags=0x08000000)
@@ -50,7 +50,7 @@ def recognize(body):
     data=base64.b64decode(body.get('data','').split(',')[-1],validate=True)
     if len(data)>20_000_000:raise ValueError('File limit 20 MB / 图纸限20MB')
     text='';preview='';engine=''
-    with tempfile.TemporaryDirectory(prefix='whole_house_customization_drawing_') as tmp:
+    with tempfile.TemporaryDirectory(prefix='vouguer_drawing_') as tmp:
         if suffix=='.dxf':
             raw=data.decode('utf-8',errors='replace').splitlines();values=[]
             for i in range(0,len(raw)-1,2):

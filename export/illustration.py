@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-柜体示意图生成器（Pillow 手绘，无第三方绘图库依赖）
-=====================================================
-按「柜型 + 实际长高深」画一张带尺寸箭头标注的立体示意图，供 Excel 报价单 /
+柜体示意图生成器（Pillow 手绘 + 白色柜体样板图，无第三方绘图库依赖）
+=====================================================================
+按「柜型 + 实际长高深」画一张带尺寸标注的示意图，供 Excel 报价单 /
 PDF / 打印页的 PICTURE 图片列使用。
 
 对外主入口：
@@ -10,9 +10,14 @@ PDF / 打印页的 PICTURE 图片列使用。
            mm_per_ft=304.8, dim_unit="mm",
            cab_name="", cab_name_en="") -> str
 
-kind 支持：
-    wardrobe / shoe / tv / study / vanity / balcony / storage
-    kitchen_base / kitchen_wall / panel / quartz / sink / cabinet
+kind 支持（白色样板图）：balcony / tv / altar / shoe / dressing_table /
+    book_desk / bookcase / wine / kitchen / island / low_cabinet / wardrobe
+kind 支持（手绘兜底）：kitchen_base / kitchen_wall / panel / quartz / sink /
+    vanity / storage / study / cabinet
+
+样板图取自 assets/white_models 的 12 张白色柜体实拍/渲染图，保持原比例贴入
+480x320 画布（不拉伸），尺寸仍按实际长高深标注。样板图缺失或柜型不在 12 类内时，
+自动退回原来的手绘示意图，不影响导出。
 
 旧 key 兼容：custom_cabinet（按柜体名称再分流）、base_cabinet→kitchen_base、
 wall_cabinet→kitchen_wall、wall_panel→panel、fridge→cabinet。
@@ -28,20 +33,40 @@ from typing import Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
+# ---------------- 白色柜体样板图 ----------------
+ASSET_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "assets", "white_models")
+
+# 12 类白色样板图：柜型 key → assets/white_models 下的文件名。顺序与样板图一致。
+MODEL_ASSETS = {
+    "balcony": "balcony.png",
+    "tv": "tv.png",
+    "altar": "altar.png",
+    "shoe": "shoe.png",
+    "dressing_table": "dressing_table.png",
+    "book_desk": "book_desk.png",
+    "bookcase": "bookcase.png",
+    "wine": "wine.png",
+    "kitchen": "kitchen.png",
+    "island": "island.png",
+    "low_cabinet": "low_cabinet.png",
+    "wardrobe": "wardrobe.png",
+}
+
 # ---------------- 画布 ----------------
 CW, CH = 480, 320
 
-# ---------------- 配色（浅木色 + 中性灰标注） ----------------
-BODY_FRONT = (233, 227, 213)
-BODY_SIDE = (211, 204, 187)
-BODY_TOP = (245, 241, 231)
-EDGE = (198, 191, 175)
-SEAM = (205, 197, 180)
-HANDLE = (172, 164, 148)
-INSIDE = (214, 207, 191)     # 开放格内部
-INSIDE_SHADOW = (196, 189, 173)
-SLAB = (247, 244, 236)
-SLAB_EDGE = (200, 193, 178)
+# ---------------- 配色（白色柜体 + 中性灰标注，与白色样板图同色系） ----------------
+BODY_FRONT = (250, 250, 250)
+BODY_SIDE = (238, 239, 241)
+BODY_TOP = (255, 255, 255)
+EDGE = (196, 200, 206)
+SEAM = (214, 217, 222)
+HANDLE = (176, 181, 188)
+INSIDE = (240, 241, 243)     # 开放格内部
+INSIDE_SHADOW = (224, 226, 230)
+SLAB = (252, 252, 252)
+SLAB_EDGE = (198, 202, 208)
 STEEL = (176, 180, 184)
 GLASS = (226, 233, 238)
 DIM_LINE = (140, 140, 148)
@@ -49,7 +74,8 @@ DIM_TEXT = (88, 88, 96)
 BG = (255, 255, 255, 0)
 
 # 画法版本：改绘图逻辑时 +1，缓存文件名带版本，避免复用旧图（旧图不会自动失效）
-PIC_VERSION = "v4"
+# v6：12 类改用 assets/white_models 白色样板图（v5 及以前为木色手绘图）
+PIC_VERSION = "v6"
 
 _FONT_PATHS = [
     r"C:\Windows\Fonts\msyhbd.ttc",
@@ -87,6 +113,14 @@ KIND_LABEL = {
     "shoe": "SHOE CABINET",
     "tv": "TV CABINET",
     "study": "STUDY CABINET",
+    "book_desk": "STUDY DESK",
+    "bookcase": "BOOKCASE",
+    "dressing_table": "DRESSING TABLE",
+    "altar": "ALTAR CABINET",
+    "island": "KITCHEN ISLAND",
+    "wine": "WINE CABINET",
+    "low_cabinet": "LOW CABINET",
+    "kitchen": "KITCHEN CABINET",
     "vanity": "VANITY CABINET",
     "balcony": "BALCONY CABINET",
     "storage": "STORAGE CABINET",
@@ -98,52 +132,98 @@ KIND_LABEL = {
     "cabinet": "CABINET",
 }
 
-# 名称关键字 → 柜型（先英文后中文，长词优先）
+# 品类 key 已经指明具体柜型的，必须先于名称关键字判定：
+# 「吊柜 / 地柜 / 护墙板 / 台面 / 水槽」不能被「橱柜 / kitchen cabinet」这类宽泛词覆盖。
+_CATEGORY_KIND = {
+    "base_cabinet": "kitchen_base",
+    "wall_cabinet": "kitchen_wall",
+    "wall_panel": "panel",
+    "kitchen_base": "kitchen_base",
+    "kitchen_wall": "kitchen_wall",
+    "panel": "panel",
+    "quartz": "quartz",
+    "sink": "sink",
+}
+
+# 名称关键字 → 柜型（先英文后中文；具体柜型必须先于「橱柜 / kitchen cabinet」这类宽泛词，
+# 否则「Kitchen cabinet sink」「橱柜护墙板」会被整张橱柜图覆盖）
 _KIND_RULES = [
+    ("dressing_table", ("dressing table", "makeup table", "vanity table", "梳妆台", "妆台")),
+    ("book_desk", ("study desk", "writing desk", "book desk", "书台", "书桌")),
+    ("bookcase", ("bookcase", "bookshelf", "书柜")),
+    ("altar", ("altar cabinet", "altar table", "神台柜", "神台", "神龛", "佛龛", "供桌")),
+    ("island", ("kitchen island", "island cabinet", "岛台")),
+    ("low_cabinet", ("low cabinet", "矮柜")),
+    ("wine", ("wine cabinet", "wine rack", "酒柜")),
+    ("balcony", ("balcony cabinet", "阳台柜")),
+    ("tv", ("tv cabinet", "tv unit", "tv console", "television cabinet", "media cabinet",
+            "media console", "电视柜")),
+    # 具体橱柜类型与平板类材料：先于宽泛的 kitchen / 橱柜
     ("kitchen_base", ("base cabinet", "kitchen base", "地柜", "底柜")),
-    ("kitchen_wall", ("wall cabinet", "upper cabinet", "吊柜")),
+    ("kitchen_wall", ("wall cabinet", "upper cabinet", "吊柜", "墙柜")),
+    ("sink", ("kitchen sink", "sink", "水槽")),
+    ("quartz", ("quartz", "stone top", "countertop", "石英石", "台面")),
+    ("panel", ("wall panel", "panelling", "paneling", "护墙板", "墙板")),
+    ("kitchen", ("kitchen cabinet", "kitchen cupboard", "橱柜")),
     ("wardrobe", ("wardrobe", "walk-in", "closet", "衣柜", "衣帽间")),
-    ("shoe", ("shoe", "鞋柜")),
-    ("tv", ("tv cabinet", "tv unit", "tv console", "media", "电视柜")),
-    ("vanity", ("vanity", "basin", "washbasin", "浴室柜", "洗手台", "洗手盆")),
-    ("study", ("study", "bookcase", "bookshelf", "desk", "书柜", "书桌")),
+    ("shoe", ("shoe cabinet", "shoe rack", "shoe", "鞋柜")),
     ("balcony", ("balcony", "laundry", "阳台")),
+    ("vanity", ("bathroom vanity", "bathroom cabinet", "washbasin", "vanity", "basin",
+                "浴室柜", "洗手台", "洗手盆")),
+    ("study", ("study cabinet", "study", "书房柜")),
     ("storage", ("storage", "sideboard", "餐边柜", "储物柜", "杂物柜")),
-    ("panel", ("wall panel", "panelling", "paneling", "护墙板")),
 ]
+
+_DIRECT_KIND = {
+    "wall_panel": "panel",
+    "base_cabinet": "kitchen_base",
+    "wall_cabinet": "kitchen_wall",
+    "quartz": "quartz",
+    "sink": "sink",
+    "wardrobe": "wardrobe",
+    "shoe": "shoe",
+    "tv": "tv",
+    "study": "study",
+    "vanity": "vanity",
+    "balcony": "balcony",
+    "storage": "storage",
+    "kitchen": "kitchen",
+    "fridge": "cabinet",
+    "cabinet": "cabinet",
+}
 
 
 def resolve_kind(cat_key: str, cab_name: str = "", cab_name_en: str = "") -> str:
-    """把「品类 key + 柜体名称」解析成绘图柜型。"""
-    key = (cat_key or "").strip()
-    # 品类本身已经明确的，直接映射
-    direct = {
-        "wall_panel": "panel",
-        "base_cabinet": "kitchen_base",
-        "wall_cabinet": "kitchen_wall",
-        "quartz": "quartz",
-        "sink": "sink",
-        "wardrobe": "wardrobe",
-        "shoe": "shoe",
-        "tv": "tv",
-        "study": "study",
-        "vanity": "vanity",
-        "balcony": "balcony",
-        "storage": "storage",
-        "fridge": "cabinet",
-        "cabinet": "cabinet",
-    }
-    if key in direct:
-        return direct[key]
+    """把「品类 key + 柜体名称」解析成绘图柜型。
 
-    hay = " ".join([(cab_name_en or "").lower(), (cab_name or "").lower()])
-    if hay.strip():
+    判定顺序：具体品类 key（吊柜/地柜/护墙板/台面/水槽）→ 柜体名称关键字
+    （具体柜型先于宽泛的「橱柜 / kitchen cabinet」）→ 其余品类 key 直映 →
+    柜型 key 自身 → 普通柜体。中英文名称统一小写比较，忽略首尾空白。
+    """
+    key = (cat_key or "").strip()
+    if key in _CATEGORY_KIND:
+        return _CATEGORY_KIND[key]
+    hay = " ".join([(cab_name_en or "").lower(), (cab_name or "").lower()]).strip()
+    if hay:
         for kind, words in _KIND_RULES:
             for w in words:
                 if w in hay:
                     return kind
+    if key in _DIRECT_KIND:
+        return _DIRECT_KIND[key]
+    if key in _PAINTERS:          # panel / kitchen_base / kitchen_wall … 自映射
+        return key
     # custom_cabinet 且名称没命中任何关键字 → 普通柜体
     return "cabinet"
+
+
+def model_asset(kind: str) -> str:
+    """返回该柜型对应的白色样板图路径；不在 12 类内或文件缺失时返回空串。"""
+    name = MODEL_ASSETS.get((kind or "").strip())
+    if not name:
+        return ""
+    path = os.path.join(ASSET_DIR, name)
+    return path if os.path.isfile(path) else ""
 
 
 def kind_label(kind: str) -> str:
@@ -432,6 +512,29 @@ def _draw_study(draw, ox, oy, W, H, dx, dy, w_ft=6.0) -> None:
         draw.line([(x_split, oy - H * 0.5), (ox + W, oy - H * 0.5)], fill=SEAM, width=1)
 
 
+def _draw_book_desk(draw, ox, oy, W, H, dx, dy, w_ft=5.0) -> None:
+    """Study desk: open knee space, desktop and one drawer pedestal."""
+    top = max(7.0, H * 0.09)
+    _slab(draw, ox, oy - H * 0.28, W, top, dx, dy)
+    leg_top = oy - H * 0.28 + top
+    draw.rectangle([ox + 5, leg_top, ox + W * 0.18, oy - 3], fill=BODY_FRONT, outline=EDGE)
+    draw.line([(ox + W * 0.18, leg_top), (ox + W * 0.18, oy - 3)], fill=EDGE, width=1)
+    _drawer(draw, ox + W * 0.70, leg_top - 2, ox + W - 4, oy - 3)
+
+
+def _draw_dressing_table(draw, ox, oy, W, H, dx, dy, w_ft=3.0) -> None:
+    """Dressing table: drawers and a tall mirror, unlike a basin vanity."""
+    top = max(6.0, H * 0.08)
+    _box(draw, ox, oy, W, H * 0.52, dx, dy, legs=True, doors=0)
+    _drawer(draw, ox + 4, oy - H * 0.52 + 3, ox + W - 4, oy - H * 0.52 + H * 0.18)
+    mirror_w, mirror_h = W * 0.38, H * 0.38
+    cx = ox + W * 0.5
+    y2 = oy - H * 0.52 - top
+    draw.rounded_rectangle([cx - mirror_w / 2, y2 - mirror_h, cx + mirror_w / 2, y2],
+                           radius=5, fill=(241, 244, 247), outline=STEEL, width=2)
+    draw.line([(cx, y2 - mirror_h + 5), (cx, y2 - 3)], fill=EDGE, width=1)
+
+
 def _draw_vanity(draw, ox, oy, W, H, dx, dy, w_ft=3.0) -> None:
     """浴室柜：柜体 + 台面 + 台上盆 + 龙头。"""
     _box(draw, ox, oy, W, H, dx, dy, legs=True, doors=2, handle_frac=0.5)
@@ -567,6 +670,14 @@ _PAINTERS = {
     "shoe": _draw_shoe,
     "tv": _draw_tv,
     "study": _draw_study,
+    "bookcase": _draw_study,
+    "book_desk": _draw_book_desk,
+    "dressing_table": _draw_dressing_table,
+    "altar": _draw_cabinet,
+    "island": _draw_kitchen_base,
+    "kitchen": _draw_kitchen_base,
+    "wine": _draw_storage,
+    "low_cabinet": _draw_storage,
     "vanity": _draw_vanity,
     "balcony": _draw_balcony,
     "storage": _draw_storage,
@@ -577,6 +688,55 @@ _PAINTERS = {
     "quartz": _draw_quartz,
     "sink": _draw_sink,
 }
+
+
+# ---------------- 白色样板图拼版 ----------------
+MODEL_AREA = (56, 40, CW - 56 - 74, CH - 40 - 56)      # 与手绘一致的绘图区
+
+
+def _fit_box(iw: int, ih: int, avail_w: float, avail_h: float) -> Tuple[int, int]:
+    """等比缩放到可用区域内的像素尺寸（长宽比保持，不拉伸）。"""
+    iw, ih = max(1, int(iw)), max(1, int(ih))
+    scale = min(float(avail_w) / iw, float(avail_h) / ih)
+    return max(1, int(round(iw * scale))), max(1, int(round(ih * scale)))
+
+
+def _model_box(iw: int, ih: int) -> Tuple[int, int, int, int]:
+    """样板图在画布上的居中矩形 (x, y, w, h)。"""
+    ml, mt, avail_w, avail_h = MODEL_AREA
+    w, h = _fit_box(iw, ih, avail_w, avail_h)
+    return (int(round(ml + (avail_w - w) / 2.0)),
+            int(round(mt + (avail_h - h) / 2.0)), w, h)
+
+
+def _paste_model(img: Image.Image, source: Image.Image, rect) -> None:
+    """把样板图等比贴到既定矩形（不拉伸）。"""
+    x, y, w, h = rect
+    resized = source.resize((w, h), Image.LANCZOS)
+    img.paste(resized, (x, y), resized)
+
+
+def _annotate_model(img, draw, rect, raw_w: float, raw_h: float, raw_d: float,
+                    dim_unit: str, font) -> None:
+    """在样板图外围标注实际宽/高/深；文字与单位口径与手绘图一致。
+
+    所有标注都画在图片矩形**外侧**（引出线从矩形外一格起笔），并且在调用方
+    之**后再贴一次图片**：图片矩形内因此始终与源图逐像素一致，任何标注
+    （含字体上下伸部）都不可能覆盖照片边缘。
+    """
+    x, y, w, h = rect
+    _dim_h(img, draw, x, x + w, min(y + h + 20, CH - 26), y + h + 1,
+           _dim_label("W", raw_w, dim_unit), font)
+    _dim_v(img, draw, y, y + h, max(14.0, x - 22), x - 1,
+           _dim_label("H", raw_h, dim_unit), font)
+    if raw_d > 0:
+        text = _dim_label("D", raw_d, dim_unit)
+    else:
+        text = "D —"
+    tw, th = _text_size(draw, text, font)
+    tx = min(max(x + w - tw, 4.0), CW - tw - 4.0)
+    ty = min(max(y - th - 8, 4.0), CH - th - 4.0)
+    draw.text((tx, ty), text, font=font, fill=DIM_TEXT)
 
 
 # ---------------- 主入口 ----------------
@@ -647,6 +807,27 @@ def render(kind: str, w_mm: float, h_mm: float, d_mm: float,
     img = Image.new("RGBA", (CW, CH), BG)
     draw = ImageDraw.Draw(img)
     f_dim = _font(dim_font)
+
+    # 12 类柜型用白色样板图；其余柜型（护墙板 / 台面 / 水槽 / 浴室柜 / 未知）仍用手绘。
+    asset = model_asset(kind)
+    if asset:
+        try:
+            with Image.open(asset) as handle:
+                source = handle.convert("RGBA")
+            rect = _model_box(source.width, source.height)
+            # 先画尺寸标注、最后贴照片：照片矩形内永远与源图逐像素一致，
+            # 标注（含字体上下伸部）只会落在矩形外侧。
+            _annotate_model(img, draw, rect, raw_w, raw_h, raw_d, dim_unit, f_dim)
+            _paste_model(img, source, rect)
+            out_dir = os.path.dirname(os.path.abspath(out_path))
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+            img.convert("RGB").save(out_path, "PNG")
+            return out_path
+        except Exception:
+            # 样板图损坏或不可读时退回手绘，导出不中断
+            img = Image.new("RGBA", (CW, CH), BG)
+            draw = ImageDraw.Draw(img)
 
     _PAINTERS[kind](draw, ox, oy, W, H, dx, dy, w)
 

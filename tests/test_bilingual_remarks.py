@@ -74,12 +74,12 @@ class BilingualRemarkTests(unittest.TestCase):
             xlsx.export_workbook(str(path),self.cfg,{'quote_no':'BILINGUAL'},[ln],summary,kind)
             w=load_workbook(path,rich_text=True);sheet=w.worksheets[0]
             row=next(row for row in sheet if row[0].value==1 and row[1].value is not None)
-            text=str(row[9].value)
+            text=str(row[10].value)
             self.assertIn('LED Strip 2 m',text);self.assertIn('\n含 灯带 2 米',text)
-            self.assertIsInstance(row[9].value,CellRichText)
-            blocks=[b for b in row[9].value if isinstance(b,TextBlock) and b.text.strip()]
+            self.assertIsInstance(row[10].value,CellRichText)
+            blocks=[b for b in row[10].value if isinstance(b,TextBlock) and b.text.strip()]
             self.assertGreater(blocks[0].font.sz,blocks[-1].font.sz)
-            self.assertTrue(str(row[8].value).startswith('='))
+            self.assertTrue(str(row[9].value).startswith('='))
     def test_print_customer_and_internal_have_both_languages(self):
         ln,summary=self.calculate(led_type='yes',led_qty=2,led_power=True,led_sensor=True)
         for kind in ('customer','internal'):
