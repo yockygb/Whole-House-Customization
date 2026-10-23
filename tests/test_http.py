@@ -65,8 +65,9 @@ class HttpTests(unittest.TestCase):
             return json.load(response)
 
     def test_project_name_in_identity_and_page(self):
-        self.assertEqual(self.request_json('/api/identity')['application'],
-                         'whole-house-customization-independent-v3')
+        identity = self.request_json('/api/identity')
+        self.assertEqual(identity['application'], 'whole-house-customization-independent-v3')
+        self.assertEqual(identity['version'], '3.0.2')
         with urllib.request.urlopen(self.base + '/', timeout=5) as response:
             html = response.read().decode('utf-8')
         self.assertIn('<title>Whole-House Customization 报价系统</title>', html)

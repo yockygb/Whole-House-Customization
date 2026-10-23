@@ -1,6 +1,6 @@
 # Changelog / 更新记录
 
-## Unreleased / 待发布
+## 3.0.2 — 2026-10-23
 
 - Ported quotation workflow improvements while retaining the independent v3 codebase: dropdown category selection, repeated numbered rooms, per-quotation quick-entry memory, and Ctrl+V drawing-image paste.
 - Added persistent ordering for categories, floors, rooms, materials, door finishes and add-ons; ordering is reflected in the quote form.

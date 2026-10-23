@@ -154,7 +154,7 @@ def install(api):
 
     @route('GET','/api/identity')
     def independent_identity(conn,m,body,q):
-        return {'application':'whole-house-customization-independent-v3','version':'3.0.1','data_directory':DATA_DIR}
+        return {'application':'whole-house-customization-independent-v3','version':'3.0.2','data_directory':DATA_DIR}
 
     @route('GET','/api/config')
     def independent_config_get(conn,m,body,q):

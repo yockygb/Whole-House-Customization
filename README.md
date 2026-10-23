@@ -5,6 +5,8 @@ An English-first, Chinese-assisted local quotation application for whole-house
 custom furniture. Python backend, browser-based desktop interface, SQLite data,
 Excel/PDF/print exports. Released under the **MIT License**.
 
+**Current source release / 当前源码版本：3.0.2**
+
 英文为主、中文为辅的本机全屋定制报价系统。支持柜体、柜门、橱柜、护墙板、灯带及五金增项，
 本机保存业务数据，生成带尺寸示意图的 Excel、PDF 和打印报价。**MIT 开源，允许修改和商用。**
 
