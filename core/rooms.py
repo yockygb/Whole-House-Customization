@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Dict, List
 
 # 标准 13 个（与 data/pricing.json 保持一致，作为兜底） + 常见扩展
@@ -100,6 +101,12 @@ def room_en(name: str, known: Dict[str, str] | None = None) -> str:
         for k, v in known.items():
             if k == raw:
                 return (v or "").strip()
+        for k, v in sorted(known.items(), key=lambda pair: len(pair[0]), reverse=True):
+            if raw.startswith(k):
+                suffix = raw[len(k):]
+                match = re.fullmatch(r"\s*(?:#|№)?\s*(\d+)", suffix)
+                if match and v:
+                    return f"{v.strip()} {match.group(1)}"
     hit = ROOM_EN.get(raw)
     if hit:
         return hit

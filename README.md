@@ -46,8 +46,12 @@ For headless startup: `python app.py --no-browser --port 8878`.
   depth and non-standard rules. / 面积、长度、数量计价，柜门拆分、最低计价高、超深与非标规则。
 - LED, power supplies, sensors, glass doors, quartz, sinks and baskets.
   / 灯带、电源、感应器、玻璃门、台面、水槽与拉篮。
-- Editable materials, rates, costs, categories, company information and bilingual terms.
-  / 可编辑材料、报价、成本、品类、公司抬头及双语条款。
+- Editable categories and materials (add, edit, remove/disable); saved ordering for
+  categories, floors, rooms, materials, doors and add-ons flows into quotation choices.
+  / 品类、材料可新增、修改、移除或停用；品类、楼层、区域、材料、柜门及增项排序会同步到报价选项。
+- Numbered repeated room instances (for example Bedroom 1 / Bedroom 2), with bilingual
+  labels; quick-entry material and add-on choices are remembered per quotation and reset
+  for a new quotation. / 支持卧室1、卧室2等重复区域及双语名称；快速录入会按报价记住材料与增项，新建报价后重置。
 - Autosave, duplicate/edit, locked-price snapshots, backup and restore.
   / 自动保存、复制编辑、锁价快照、备份与恢复。
 - English/Chinese customer and internal Excel/PDF/print output, embedded
@@ -55,6 +59,8 @@ For headless startup: `python app.py --no-browser --port 8878`.
 - Local image/PDF/ASCII-DXF dimension-assisted entry; extracted dimensions
   require review, not automatic room/cabinet design interpretation.
   / 本机图纸尺寸辅助录入，识别结果需人工核对，不是全自动拆单或设计识别。
+- Paste a copied drawing image with Ctrl+V in the drawing dialog.
+  / 在图纸识别窗口按 Ctrl+V 粘贴剪贴板中的图片。
 
 ## Demo data and business data / 演示与业务数据
 

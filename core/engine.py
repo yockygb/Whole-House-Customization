@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .cab_name import resolve_cabinet_name_en
 from .floors import floor_name_en, floor_rank, normalize_floor
+from .rooms import room_en as resolve_room_en
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_CONFIG = os.path.join(BASE_DIR, "data", "pricing.json")
@@ -162,10 +163,8 @@ class PricingConfig:
         return [r.get("name", "") for r in self.rooms()]
 
     def room_en(self, name: str) -> str:
-        for r in self.rooms():
-            if r.get("name") == name:
-                return r.get("name_en", name)
-        return name
+        known = {r.get("name", ""): r.get("name_en", "") for r in self.rooms()}
+        return resolve_room_en(name, known)
 
     def mode_label_en(self, mode: Optional[str] = None) -> str:
         return self.meta.get("price_modes_en", {}).get(

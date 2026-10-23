@@ -105,7 +105,7 @@ def bootstrap_payload(conn) -> Dict[str, Any]:
         "price_modes_en": raw.get("meta", {}).get("price_modes_en", {}),
         "categories": cats,
         "rooms": _rooms_with_extra(cfg),
-        "floors": store.list_floors(conn),
+        "floors": raw.get("floors") if isinstance(raw.get("floors"), list) else store.list_floors(conn),
         "floor_codes": FLOOR_CODES,
         "floor_en": FLOOR_EN,
         "led": cfg.led_meta(),

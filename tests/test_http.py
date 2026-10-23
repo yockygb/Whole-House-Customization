@@ -56,11 +56,11 @@ class HttpTests(unittest.TestCase):
         cls.log.close()
         cls.tmp.cleanup()
 
-    def request_json(self, path, data=None):
+    def request_json(self, path, data=None, method=None):
         request = urllib.request.Request(
             self.base + path,
             data=json.dumps(data).encode('utf-8') if data is not None else None,
-            headers={'Content-Type': 'application/json'})
+            headers={'Content-Type': 'application/json'}, method=method)
         with urllib.request.urlopen(request, timeout=15) as response:
             return json.load(response)
 
@@ -78,6 +78,71 @@ class HttpTests(unittest.TestCase):
         self.assertTrue(self.request_json('/api/bootstrap'))
         with urllib.request.urlopen(self.base + '/', timeout=5) as response:
             self.assertIn(b'id="depth"', response.read())
+
+    def test_custom_category_material_can_be_created_edited_and_deleted(self):
+        config = self.request_json('/api/config')['config']
+        key = 'test_category'
+        config['categories'].append({
+            'key': key, 'name': '测试品类', 'name_en': 'Test Category',
+            'group': 'cabinet', 'measure': 'area', 'std_depth_mm': 600,
+            'min_height_ft': 0, 'default_height_mm': 2400,
+        })
+        config['prices'][key] = {
+            'standard': {'label': '标准材料', 'label_en': 'Standard',
+                         'part': 'body', 'unit': 'ft2', 'supply': 0,
+                         'market': [0, 0]}
+        }
+        self.request_json('/api/config', {'config': config}, method='PUT')
+        created = self.request_json('/api/materials', {
+            'cat_key': key, 'mat_key': 'test_board', 'part': 'body',
+            'name': '测试板材', 'name_en': 'Test Board', 'unit': 'ft2',
+            'quote_price': 0, 'cost_price': 0,
+        })['material']
+        self.assertEqual(created['cat_key'], key)
+        self.assertIn(key, [c['key'] for c in self.request_json('/api/bootstrap')['categories']])
+        self.request_json('/api/materials/%d' % created['id'], {
+            'name': '已修改材料', 'name_en': 'Edited Board',
+        }, method='PUT')
+        quote = self.request_json('/api/quotes', {
+            'customer': 'Test Customer', 'project': 'Test Project',
+            'items': [{'cat': key, 'material': 'test_board',
+                       'length_mm': 1200, 'height_mm': 2400,
+                       'depth_mm': 600, 'qty': 1, 'unit_price': 0}],
+        })['quote']
+        config = self.request_json('/api/config')['config']
+        config['categories'] = [c for c in config['categories'] if c['key'] != key]
+        config['prices'].pop(key, None)
+        self.request_json('/api/config', {'config': config}, method='PUT')
+        self.assertNotIn(key, [c['key'] for c in self.request_json('/api/bootstrap')['categories']])
+        archived = self.request_json('/api/config')['config']
+        archived_category = next(c for c in archived['categories'] if c['key'] == key)
+        self.assertFalse(archived_category['enabled'])
+        self.assertIn('test_board', archived['prices'][key])
+        saved_quote = self.request_json('/api/quotes/%d' % quote['id'])['quote']
+        self.assertEqual(saved_quote['items'][0]['cat'], key)
+
+    def test_option_order_is_persisted_and_returned_to_quote_form(self):
+        before = self.request_json('/api/bootstrap')['categories']
+        original = [c['key'] for c in before]
+        changed = list(reversed(original))
+        result = self.request_json('/api/catalogue/order', {
+            'collection': 'categories', 'order': changed,
+        })
+        self.assertEqual([c['key'] for c in result['bootstrap']['categories']], changed)
+        self.request_json('/api/catalogue/order', {
+            'collection': 'categories', 'order': original,
+        })
+
+    def test_floor_order_is_returned_to_quote_form(self):
+        original = [f['code'] for f in self.request_json('/api/bootstrap')['floors']]
+        changed = list(reversed(original))
+        result = self.request_json('/api/catalogue/order', {
+            'collection': 'floors', 'order': changed,
+        })
+        self.assertEqual([f['code'] for f in result['bootstrap']['floors']], changed)
+        self.request_json('/api/catalogue/order', {
+            'collection': 'floors', 'order': original,
+        })
 
     def test_create_quote_and_download_customer_workbook(self):
         result = self.request_json('/api/quotes', {

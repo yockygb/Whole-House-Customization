@@ -1,5 +1,14 @@
 # Changelog / 更新记录
 
+## Unreleased / 待发布
+
+- Ported quotation workflow improvements while retaining the independent v3 codebase: dropdown category selection, repeated numbered rooms, per-quotation quick-entry memory, and Ctrl+V drawing-image paste.
+- Added persistent ordering for categories, floors, rooms, materials, door finishes and add-ons; ordering is reflected in the quote form.
+- Exposed category and material add/edit/remove controls while retaining historical quotation data when entries are removed.
+- 保留独立版 v3 架构并移植录单改进：品类下拉选择、重复编号区域、按报价记忆快速录入，以及图纸窗口 Ctrl+V 粘贴图片。
+- 新增品类、楼层、区域、材料、柜门和增项的持久排序，并同步到报价页面。
+- 完善品类与材料新增、编辑、移除/停用管理；移除时保留历史报价数据。
+
 ## 3.0.1 — 2026-10-21
 
 - Removed bundled prices, costs, company information, logos and commercial terms.

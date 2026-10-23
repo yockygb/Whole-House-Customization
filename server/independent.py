@@ -93,6 +93,43 @@ def save_config(conn, raw):
         store._pricing_cache['raw']=None
         store.seed_materials(conn)
 
+def reorder_catalogue(raw, collection, order, category=None, part=None):
+    def reorder_rows(rows, identity):
+        if not isinstance(order, list):
+            raise ValueError('Order must be a list / 顺序数据格式错误')
+        keys=[identity(row) for row in rows]
+        if len(keys)!=len(set(keys)) or len(order)!=len(keys) or len(order)!=len(set(order)) or set(order)!=set(keys):
+            raise ValueError('Order must include every option once / 排序需包含每个选项且不能重复')
+        by_key={identity(row):row for row in rows}
+        return [by_key[key] for key in order]
+
+    if collection=='categories':
+        rows=raw.get('categories',[])
+        active=[row for row in rows if row.get('enabled',True)]
+        archived=[row for row in rows if not row.get('enabled',True)]
+        raw['categories']=reorder_rows(active,lambda row:row.get('key'))+archived
+    elif collection=='rooms':
+        raw['rooms']=reorder_rows(raw.get('rooms',[]),lambda row:row.get('name'))
+    elif collection=='floors':
+        rows=raw.setdefault('floors',[])
+        raw['floors']=reorder_rows(rows,lambda row:row.get('code'))
+    elif collection=='extras':
+        raw.setdefault('extras',{})['items']=reorder_rows(raw.get('extras',{}).get('items',[]),lambda row:row.get('key'))
+    elif collection in ('materials','doors'):
+        table=raw.get('prices',{}).get(category)
+        if not isinstance(table,dict):
+            raise ValueError('Choose a valid category / 请选择有效品类')
+        wanted='door' if collection=='doors' else 'body'
+        keys=[key for key,value in table.items() if (value.get('part','body')=='door')==(wanted=='door')]
+        if not isinstance(order,list) or len(order)!=len(set(order)) or set(order)!=set(keys):
+            raise ValueError('Order must include every option once / 排序需包含每个选项且不能重复')
+        reordered={key:table[key] for key in order}
+        reordered.update((key,value) for key,value in table.items() if key not in reordered)
+        raw['prices'][category]=reordered
+    else:
+        raise ValueError('Unknown catalogue section / 未知排序分区')
+    return raw
+
 def export_config(conn,quote):
     snapshot=quote.get('snapshot') or {}
     if quote.get('locked') and snapshot.get('pricing'):
@@ -143,6 +180,18 @@ def install(api):
         save_config(conn,raw)
         row=conn.execute('SELECT id FROM materials WHERE cat_key=? AND mat_key=?',(cat,key)).fetchone()
         return {'ok':True,'material':store.update_material(conn,row['id'],body)}
+
+    @route('POST','/api/catalogue/order')
+    def independent_catalogue_order(conn,m,body,q):
+        raw=copy.deepcopy(store.pricing_raw())
+        try:
+            if body.get('collection')=='floors' and 'floors' not in raw:
+                raw['floors']=store.list_floors(conn)
+            reorder_catalogue(raw,body.get('collection'),body.get('order'),body.get('category'),body.get('part'))
+            save_config(conn,raw)
+        except (ValueError,KeyError,TypeError) as e:
+            raise api.ApiError(str(e))
+        return {'ok':True,'bootstrap':api.bootstrap_payload(conn)}
 
     @route('DELETE',r'/api/materials/(\d+)')
     def independent_material_disable(conn,m,body,q):

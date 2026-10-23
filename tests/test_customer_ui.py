@@ -27,5 +27,27 @@ class CustomerPageTests(unittest.TestCase):
         self.assertNotIn('gross_profit',render)
         self.assertNotIn('supply_total',render)
         self.assertNotIn("$('profit')",render)
+    def test_categories_use_dropdown_and_rooms_can_be_duplicated(self):
+        page=PageParser();page.feed((ROOT/'web/studio.html').read_text(encoding='utf-8'))
+        self.assertIn('categorySelect',page.ids)
+        self.assertNotIn('categoryTabs',page.ids)
+        self.assertIn('addRoomBtn',page.ids)
+        script=(ROOT/'web/studio.js').read_text(encoding='utf-8')
+        self.assertIn('function addRoomInstance()',script)
+        self.assertIn('function syncRoomOptions(',script)
+    def test_entry_memory_is_scoped_to_quote_and_image_paste_works_in_drawing(self):
+        script=(ROOT/'web/studio.js').read_text(encoding='utf-8')
+        self.assertIn('function currentEntryDrafts()',script)
+        self.assertIn('S.entryDrafts[S.q.id]',script)
+        self.assertIn("if($('modal').open&&!$('drawingFile'))return",script)
+        self.assertIn('await drawingPasteHandler?.(image)',script)
+    def test_room_label_is_not_repeated_when_english_falls_back_to_chinese(self):
+        script=(ROOT/'web/studio.js').read_text(encoding='utf-8')
+        self.assertIn('function roomDisplay(it,line)',script)
+        self.assertIn('${esc(roomDisplay(it,l))}',script)
+    def test_management_exposes_category_delete_and_persistent_order(self):
+        script=(ROOT/'web/studio.js').read_text(encoding='utf-8')
+        self.assertIn('data-delete-category',script)
+        self.assertIn("api('/api/catalogue/order','POST'",script)
 
 if __name__=='__main__':unittest.main(verbosity=2)

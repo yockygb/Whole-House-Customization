@@ -15,3 +15,14 @@
  .brand{flex-basis:100%}.topbar nav{width:100%;justify-content:space-between}
  .brand strong{font-size:16px}.brand small{display:block}
 }
+
+.category-picker{display:flex;flex-direction:column;gap:5px;margin:0 0 14px}
+.category-picker select{width:100%}
+.room-add{display:block;margin-top:6px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:transparent;color:var(--muted);font-size:11px;cursor:pointer}
+.room-add:hover{color:var(--blue);border-color:var(--blue)}
+.order-list{display:grid;gap:6px;margin:8px 0 18px}
+.order-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--paper)}
+.order-row small{display:block;color:var(--muted);font-weight:400}
+.order-buttons{display:flex;gap:4px;flex:none}
+.order-buttons button{min-width:32px;padding:4px 7px}
+.category-actions{display:flex;gap:4px;align-items:center;white-space:nowrap}
